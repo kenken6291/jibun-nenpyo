@@ -16,7 +16,6 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
   const [profileOpen, setProfileOpen] = useState(!profile.birthYear)
   const [errors, setErrors] = useState({})
 
-  // When editing, populate form
   useEffect(() => {
     if (editingEntry) {
       setForm({
@@ -69,15 +68,11 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
   const calcAge = (year) => {
     if (!profile.birthYear || !year) return null
     const age = parseInt(year) - parseInt(profile.birthYear)
-    if (!profile.birthMonth) return age
-    // approximate: if birth month > current month in that year, subtract 1
-    // For simplicity, just return the age as of Jan 1 of that year
     return age >= 0 ? age : null
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-ink-900">
-      {/* Profile section */}
+    <div className="flex flex-col bg-white dark:bg-ink-900 min-h-full">
       <div className="border-b border-ink-100 dark:border-ink-700">
         <button
           onClick={() => setProfileOpen(o => !o)}
@@ -143,14 +138,12 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
         )}
       </div>
 
-      {/* Entry form */}
       <div className="px-4 py-4 border-b border-ink-100 dark:border-ink-700 bg-ink-50/50 dark:bg-ink-800/40">
         <h2 className="text-xs font-semibold text-ink-500 dark:text-ink-400 uppercase tracking-wider mb-3">
           {editingEntry ? '📝 出来事を編集' : '＋ 出来事を追加'}
         </h2>
 
         <div className="space-y-3">
-          {/* Year and Month */}
           <div className="flex gap-2">
             <div className="flex-1">
               <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">年 *</label>
@@ -191,7 +184,6 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
             )}
           </div>
 
-          {/* Category */}
           <div>
             <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">カテゴリ</label>
             <div className="flex flex-wrap gap-1.5">
@@ -213,7 +205,6 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
             </div>
           </div>
 
-          {/* Title */}
           <div>
             <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">出来事 *</label>
             <input
@@ -231,22 +222,6 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
             {errors.title && <p className="text-xs text-red-500 mt-0.5">{errors.title}</p>}
           </div>
 
-          {/* Memo */}
-          <div>
-            <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">詳細メモ（任意）</label>
-            <textarea
-              value={form.memo}
-              onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
-              placeholder="その時の気持ちや状況を記録…"
-              rows={2}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 dark:border-ink-600
-                bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100
-                focus:outline-none focus:ring-2 focus:ring-indigo-500
-                placeholder:text-ink-300 dark:placeholder:text-ink-600 resize-none"
-            />
-          </div>
-
-          {/* Buttons */}
           <div className="flex gap-2">
             <button
               onClick={handleSubmit}
@@ -265,11 +240,24 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
               </button>
             )}
           </div>
+
+          <div>
+            <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">詳細メモ（任意）</label>
+            <textarea
+              value={form.memo}
+              onChange={e => setForm(f => ({ ...f, memo: e.target.value }))}
+              placeholder="その時の気持ちや状況を記録…"
+              rows={2}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-ink-200 dark:border-ink-600
+                bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100
+                focus:outline-none focus:ring-2 focus:ring-indigo-500
+                placeholder:text-ink-300 dark:placeholder:text-ink-600 resize-none"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Entry list */}
-      <div className="flex-1 overflow-y-auto custom-scroll">
+      <div className="flex-1">
         {entries.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-center px-4">
             <div className="text-4xl mb-3 opacity-30">📖</div>
@@ -289,7 +277,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
                     editingEntry?.id === entry.id ? 'bg-indigo-50 dark:bg-indigo-950/30' : ''
                   }`}
                 >
-                  <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${cat.color} ring-2 ${cat.color.replace('bg-', 'ring-')}/20`} style={{marginTop: '6px'}} />
+                  <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${cat.color}`} style={{marginTop: '6px'}} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="text-xs font-semibold text-ink-400 dark:text-ink-500 font-display">

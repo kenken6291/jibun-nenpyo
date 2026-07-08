@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User, Calendar, Video } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User, Calendar, Video, Image as ImageIcon, X, Loader2 } from 'lucide-react'
 import { parseVideoUrl } from '../utils/video.js'
 import VideoEmbed from './VideoEmbed.jsx'
+import { resizeImageFile, formatFileSize } from '../utils/imageResize.js'
+import { dataApi } from '../utils/api.js'
 
 const MONTHS = ['', '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
 
@@ -12,12 +14,15 @@ const emptyForm = {
   category: 'general',
   memo: '',
   videoUrl: '',
+  photoUrl: '',
 }
 
-export default function Editor({ profile, entries, editingEntry, onProfileChange, onAdd, onUpdate, onDelete, onEdit, categories }) {
+export default function Editor({ profile, entries, editingEntry, onProfileChange, onAdd, onUpdate, onDelete, onEdit, categories, session }) {
   const [form, setForm] = useState(emptyForm)
   const [profileOpen, setProfileOpen] = useState(!profile.birthYear)
   const [errors, setErrors] = useState({})
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError, setPhotoError] = useState('')
 
   useEffect(() => {
     if (editingEntry) {
@@ -28,6 +33,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
         category: editingEntry.category,
         memo: editingEntry.memo || '',
         videoUrl: editingEntry.videoUrl || '',
+        photoUrl: editingEntry.photoUrl || '',
       })
     }
   }, [editingEntry])
@@ -56,6 +62,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
       category: form.category,
       memo: form.memo.trim(),
       videoUrl: form.videoUrl.trim(),
+      photoUrl: form.photoUrl,
     }
 
     if (editingEntry) {
@@ -71,6 +78,38 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
     onEdit(null)
     setForm(emptyForm)
     setErrors({})
+    setPhotoError('')
+  }
+
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+
+    setPhotoError('')
+    setPhotoUploading(true)
+    try {
+      const resized = await resizeImageFile(file)
+      const res = await dataApi.uploadPhoto(
+        session.sessionToken,
+        file.name.replace(/\.[^.]+$/, '') + '.jpg',
+        resized.mimeType,
+        resized.base64Data
+      )
+      if (!res.success) {
+        setPhotoError(res.error || 'アップロードに失敗しました')
+        return
+      }
+      setForm(f => ({ ...f, photoUrl: res.photoUrl }))
+    } catch (err) {
+      setPhotoError(err.message || '画像の処理に失敗しました')
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  const handleRemovePhoto = () => {
+    setForm(f => ({ ...f, photoUrl: '' }))
   }
 
   const calcAge = (year) => {
@@ -257,6 +296,58 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
           </div>
 
           <div>
+            <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">
+              <ImageIcon size={12} className="inline mr-1" />写真（任意）
+            </label>
+
+            {form.photoUrl ? (
+              <div className="relative inline-block">
+                <img
+                  src={form.photoUrl}
+                  alt="アップロードした写真"
+                  className="max-w-[220px] max-h-[160px] rounded-lg border border-ink-200 dark:border-ink-600 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  title="写真を削除"
+                  className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full
+                    bg-ink-800 text-white shadow hover:bg-red-600 transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center justify-center gap-2 w-full px-3 py-3 text-sm rounded-lg border border-dashed
+                border-ink-300 dark:border-ink-600 text-ink-400 dark:text-ink-500
+                hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer">
+                {photoUploading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    アップロード中…
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon size={14} />
+                    写真を選択（自動で縮小してアップロードされます）
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={photoUploading}
+                  onChange={handlePhotoSelect}
+                />
+              </label>
+            )}
+            {photoError && <p className="text-xs text-red-500 mt-1">{photoError}</p>}
+            <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1 leading-relaxed">
+              大きい写真も自動で縮小してからGoogleドライブに保存されます
+            </p>
+          </div>
+
+          <div>
             <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">詳細メモ（任意）</label>
             <textarea
               value={form.memo}
@@ -339,6 +430,11 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
                       {entry.videoUrl && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
                           <Video size={9} /> 動画
+                        </span>
+                      )}
+                      {entry.photoUrl && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
+                          <ImageIcon size={9} /> 写真
                         </span>
                       )}
                     </div>

@@ -269,6 +269,16 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     {entry.memo}
                                   </p>
                                 )}
+                                {entry.photoUrl && (
+                                  <div className="mt-2">
+                                    <img
+                                      src={entry.photoUrl}
+                                      alt={entry.title}
+                                      className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
+                                      loading="lazy"
+                                    />
+                                  </div>
+                                )}
                                 {entry.videoUrl && (
                                   <div className="mt-2">
                                     <VideoEmbed videoUrl={entry.videoUrl} compact />
@@ -306,6 +316,16 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                   <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed">
                                     {entry.memo}
                                   </p>
+                                )}
+                                {entry.photoUrl && (
+                                  <div className="mt-2">
+                                    <img
+                                      src={entry.photoUrl}
+                                      alt={entry.title}
+                                      className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
+                                      loading="lazy"
+                                    />
+                                  </div>
                                 )}
                                 {entry.videoUrl && (
                                   <div className="mt-2">

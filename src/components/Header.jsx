@@ -1,7 +1,8 @@
 import { Sun, Moon, Download, Upload } from 'lucide-react'
 import { useRef } from 'react'
+import AccountMenu from './auth/AccountMenu.jsx'
 
-export default function Header({ darkMode, onToggleDark, onExport, onImport }) {
+export default function Header({ darkMode, onToggleDark, onExport, onImport, session, onLogout, onNicknameChanged }) {
   const fileInputRef = useRef()
 
   return (
@@ -59,6 +60,10 @@ export default function Header({ darkMode, onToggleDark, onExport, onImport }) {
         />
 
         <div className="w-px h-5 bg-ink-200 dark:bg-ink-700 mx-0.5" />
+
+        {session && (
+          <AccountMenu session={session} onLogout={onLogout} onNicknameChanged={onNicknameChanged} />
+        )}
 
         <button
           onClick={onToggleDark}

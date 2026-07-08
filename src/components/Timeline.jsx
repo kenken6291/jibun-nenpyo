@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Newspaper } from 'lucide-react'
+import VideoEmbed from './VideoEmbed.jsx'
 
 function calcAge(year, profile) {
   if (!profile.birthYear || !year) return null
@@ -108,6 +109,11 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
                 <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5 leading-relaxed">
                   {entry.memo}
                 </p>
+              )}
+              {entry.videoUrl && (
+                <div className="mt-2">
+                  <VideoEmbed videoUrl={entry.videoUrl} compact />
+                </div>
               )}
             </div>
           </div>
@@ -263,6 +269,11 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     {entry.memo}
                                   </p>
                                 )}
+                                {entry.videoUrl && (
+                                  <div className="mt-2">
+                                    <VideoEmbed videoUrl={entry.videoUrl} compact />
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -295,6 +306,11 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                   <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed">
                                     {entry.memo}
                                   </p>
+                                )}
+                                {entry.videoUrl && (
+                                  <div className="mt-2">
+                                    <VideoEmbed videoUrl={entry.videoUrl} compact />
+                                  </div>
                                 )}
                               </div>
                             </div>

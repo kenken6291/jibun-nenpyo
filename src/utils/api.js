@@ -1,6 +1,6 @@
 // GAS(Google Apps Script) Web App のURL
 // デプロイ後に発行される「.../exec」で終わるURLに書き換えてください
-export const GAS_API_URL = 'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'
+export const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwGBp9Nq-6QqbOx1-uhk-tVK1Es2-aCtfZaERt9HPawi1i9DxQ3nrWM4Uo_5mmUydaK_Q/exec'
 
 const SESSION_KEY = 'jibun-nenpyo-session'
 

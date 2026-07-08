@@ -53,4 +53,6 @@ export const dataApi = {
   addEntry: (sessionToken, entry) => callApi('addEntry', { sessionToken, entry }),
   updateEntry: (sessionToken, id, entry) => callApi('updateEntry', { sessionToken, id, entry }),
   deleteEntry: (sessionToken, id) => callApi('deleteEntry', { sessionToken, id }),
+  uploadPhoto: (sessionToken, filename, mimeType, base64Data) =>
+    callApi('uploadPhoto', { sessionToken, filename, mimeType, base64Data }),
 }

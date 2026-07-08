@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import historicalEvents from './data/historicalEvents.json'
 import Editor from './components/Editor.jsx'
 import Timeline from './components/Timeline.jsx'
 import Header from './components/Header.jsx'
-import { Sun, Moon, Edit3, BookOpen } from 'lucide-react'
-
-const STORAGE_KEY = 'jibun-nenpyo-data'
+import { dataApi } from './utils/api.js'
 
 const defaultProfile = {
   name: '',
@@ -23,7 +21,7 @@ const CATEGORIES = {
 
 export { CATEGORIES, historicalEvents }
 
-export default function App() {
+export default function App({ session, onLogout, onNicknameChanged }) {
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('jibun-nenpyo-dark') === 'true' ||
@@ -33,29 +31,41 @@ export default function App() {
   })
 
   const [mobileTab, setMobileTab] = useState('editor') // 'editor' | 'preview'
-  
+
   const [profile, setProfile] = useState(defaultProfile)
   const [entries, setEntries] = useState([])
   const [editingEntry, setEditingEntry] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [saveError, setSaveError] = useState('')
 
-  // Load from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) {
-        const data = JSON.parse(saved)
-        if (data.profile) setProfile(data.profile)
-        if (data.entries) setEntries(data.entries)
-      }
-    } catch (e) {
-      console.error('データの読み込みに失敗しました', e)
-    }
-  }, [])
+  const profileLoadedRef = useRef(false)
+  const profileSaveTimer = useRef(null)
 
-  // Save to localStorage
+  // 初回ロード: サーバー（スプレッドシート）から年表データを取得
+  const loadData = useCallback(() => {
+    setLoading(true)
+    setLoadError('')
+    dataApi.getData(session.sessionToken)
+      .then(res => {
+        if (!res.success) {
+          setLoadError(res.error || 'データの読み込みに失敗しました')
+          return
+        }
+        profileLoadedRef.current = false
+        setProfile({ ...defaultProfile, ...res.profile })
+        setEntries(res.entries || [])
+        // setProfileの直後にprofileLoadedRefをtrueにして、
+        // 読み込み直後のuseEffectによる誤った自動保存を防ぐ
+        setTimeout(() => { profileLoadedRef.current = true }, 0)
+      })
+      .catch(() => setLoadError('通信に失敗しました。時間をおいて再度お試しください。'))
+      .finally(() => setLoading(false))
+  }, [session.sessionToken])
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile, entries }))
-  }, [profile, entries])
+    loadData()
+  }, [loadData])
 
   // Dark mode
   useEffect(() => {
@@ -63,23 +73,64 @@ export default function App() {
     localStorage.setItem('jibun-nenpyo-dark', darkMode)
   }, [darkMode])
 
-  const addEntry = useCallback((entry) => {
-    const newEntry = { ...entry, id: Date.now().toString() }
-    setEntries(prev => [...prev, newEntry].sort((a, b) => a.year - b.year || a.month - b.month))
-  }, [])
+  // プロフィール変更をデバウンスしてサーバーに保存（読み込み直後の初回発火は無視）
+  useEffect(() => {
+    if (!profileLoadedRef.current) return
+    if (profileSaveTimer.current) clearTimeout(profileSaveTimer.current)
+    profileSaveTimer.current = setTimeout(() => {
+      dataApi.updateProfile(session.sessionToken, profile).catch(() => {
+        setSaveError('プロフィールの保存に失敗しました')
+      })
+    }, 800)
+    return () => clearTimeout(profileSaveTimer.current)
+  }, [profile, session.sessionToken])
 
-  const updateEntry = useCallback((id, updatedEntry) => {
-    setEntries(prev =>
-      prev.map(e => e.id === id ? { ...e, ...updatedEntry } : e)
-        .sort((a, b) => a.year - b.year || a.month - b.month)
-    )
-    setEditingEntry(null)
-  }, [])
+  const addEntry = useCallback(async (entry) => {
+    setSaveError('')
+    try {
+      const res = await dataApi.addEntry(session.sessionToken, entry)
+      if (!res.success) {
+        setSaveError(res.error || '追加に失敗しました')
+        return
+      }
+      setEntries(prev => [...prev, res.entry].sort((a, b) => a.year - b.year || (a.month || 0) - (b.month || 0)))
+    } catch {
+      setSaveError('通信に失敗しました。時間をおいて再度お試しください。')
+    }
+  }, [session.sessionToken])
 
-  const deleteEntry = useCallback((id) => {
-    setEntries(prev => prev.filter(e => e.id !== id))
-    if (editingEntry?.id === id) setEditingEntry(null)
-  }, [editingEntry])
+  const updateEntry = useCallback(async (id, updatedEntry) => {
+    setSaveError('')
+    try {
+      const res = await dataApi.updateEntry(session.sessionToken, id, updatedEntry)
+      if (!res.success) {
+        setSaveError(res.error || '更新に失敗しました')
+        return
+      }
+      setEntries(prev =>
+        prev.map(e => e.id === id ? res.entry : e)
+          .sort((a, b) => a.year - b.year || (a.month || 0) - (b.month || 0))
+      )
+      setEditingEntry(null)
+    } catch {
+      setSaveError('通信に失敗しました。時間をおいて再度お試しください。')
+    }
+  }, [session.sessionToken])
+
+  const deleteEntry = useCallback(async (id) => {
+    setSaveError('')
+    try {
+      const res = await dataApi.deleteEntry(session.sessionToken, id)
+      if (!res.success) {
+        setSaveError(res.error || '削除に失敗しました')
+        return
+      }
+      setEntries(prev => prev.filter(e => e.id !== id))
+      setEditingEntry(prev => (prev?.id === id ? null : prev))
+    } catch {
+      setSaveError('通信に失敗しました。時間をおいて再度お試しください。')
+    }
+  }, [])
 
   const exportJSON = () => {
     const data = JSON.stringify({ profile, entries }, null, 2)
@@ -92,16 +143,29 @@ export default function App() {
     URL.revokeObjectURL(url)
   }
 
+  // JSONファイルから読み込んだ内容は、クラウド（スプレッドシート）に
+  // 新しいデータとして追加保存されます（既存データは上書きされません）
   const importJSON = (e) => {
     const file = e.target.files[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const data = JSON.parse(ev.target.result)
-        if (data.profile) setProfile(data.profile)
-        if (data.entries) setEntries(data.entries)
-        alert('データを読み込みました')
+        if (data.profile) {
+          const merged = { ...defaultProfile, ...data.profile }
+          setProfile(merged)
+          await dataApi.updateProfile(session.sessionToken, merged)
+        }
+        if (Array.isArray(data.entries) && data.entries.length > 0) {
+          for (const entry of data.entries) {
+            const res = await dataApi.addEntry(session.sessionToken, entry)
+            if (res.success) {
+              setEntries(prev => [...prev, res.entry].sort((a, b) => a.year - b.year || (a.month || 0) - (b.month || 0)))
+            }
+          }
+        }
+        alert('データを読み込みました（既存のデータに追加されました）')
       } catch {
         alert('JSONファイルの読み込みに失敗しました')
       }
@@ -118,7 +182,17 @@ export default function App() {
           onToggleDark={() => setDarkMode(d => !d)}
           onExport={exportJSON}
           onImport={importJSON}
+          session={session}
+          onLogout={onLogout}
+          onNicknameChanged={onNicknameChanged}
         />
+
+        {saveError && (
+          <div className="no-print bg-red-50 dark:bg-red-950 border-b border-red-200 dark:border-red-800 px-4 py-1.5 text-xs text-red-600 dark:text-red-300 flex items-center justify-between">
+            <span>{saveError}</span>
+            <button onClick={() => setSaveError('')} className="text-red-400 hover:text-red-600">×</button>
+          </div>
+        )}
 
         {/* Mobile tab bar */}
         <div className="md:hidden flex border-b border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 no-print sticky top-14 z-20">
@@ -130,7 +204,6 @@ export default function App() {
                 : 'text-ink-500 dark:text-ink-400'
             }`}
           >
-            <Edit3 size={15} />
             編集
           </button>
           <button
@@ -141,46 +214,60 @@ export default function App() {
                 : 'text-ink-500 dark:text-ink-400'
             }`}
           >
-            <BookOpen size={15} />
             年表プレビュー
           </button>
         </div>
 
-        {/* Main layout */}
-        <main className="flex-1 flex overflow-hidden">
-          {/* Editor panel */}
-          <div className={`
-            w-full md:w-[42%] md:flex flex-col border-r border-ink-200 dark:border-ink-700
-            overflow-y-auto custom-scroll
-            ${mobileTab === 'editor' ? 'flex' : 'hidden'}
-          `}>
-            <Editor
-              profile={profile}
-              entries={entries}
-              editingEntry={editingEntry}
-              onProfileChange={setProfile}
-              onAdd={addEntry}
-              onUpdate={updateEntry}
-              onDelete={deleteEntry}
-              onEdit={setEditingEntry}
-              categories={CATEGORIES}
-            />
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-sm text-ink-400 dark:text-ink-500">年表データを読み込み中…</p>
           </div>
+        ) : loadError ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
+            <p className="text-sm text-red-500">{loadError}</p>
+            <button
+              onClick={loadData}
+              className="px-4 py-2 rounded-lg text-sm bg-indigo-700 hover:bg-indigo-800 text-white transition-colors"
+            >
+              再読み込み
+            </button>
+          </div>
+        ) : (
+          <main className="flex-1 flex overflow-hidden">
+            {/* Editor panel */}
+            <div className={`
+              w-full md:w-[42%] md:flex flex-col border-r border-ink-200 dark:border-ink-700
+              overflow-y-auto custom-scroll
+              ${mobileTab === 'editor' ? 'flex' : 'hidden'}
+            `}>
+              <Editor
+                profile={profile}
+                entries={entries}
+                editingEntry={editingEntry}
+                onProfileChange={setProfile}
+                onAdd={addEntry}
+                onUpdate={updateEntry}
+                onDelete={deleteEntry}
+                onEdit={setEditingEntry}
+                categories={CATEGORIES}
+              />
+            </div>
 
-          {/* Timeline preview panel */}
-          <div className={`
-            w-full md:w-[58%] md:flex flex-col
-            overflow-y-auto custom-scroll
-            ${mobileTab === 'preview' ? 'flex' : 'hidden'}
-          `}>
-            <Timeline
-              profile={profile}
-              entries={entries}
-              categories={CATEGORIES}
-              historicalEvents={historicalEvents}
-            />
-          </div>
-        </main>
+            {/* Timeline preview panel */}
+            <div className={`
+              w-full md:w-[58%] md:flex flex-col
+              overflow-y-auto custom-scroll
+              ${mobileTab === 'preview' ? 'flex' : 'hidden'}
+            `}>
+              <Timeline
+                profile={profile}
+                entries={entries}
+                categories={CATEGORIES}
+                historicalEvents={historicalEvents}
+              />
+            </div>
+          </main>
+        )}
       </div>
     </div>
   )

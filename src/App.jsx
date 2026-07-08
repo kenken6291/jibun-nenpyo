@@ -250,6 +250,7 @@ export default function App({ session, onLogout, onNicknameChanged }) {
                 onDelete={deleteEntry}
                 onEdit={setEditingEntry}
                 categories={CATEGORIES}
+                session={session}
               />
             </div>
 

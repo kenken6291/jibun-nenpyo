@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Newspaper } from 'lucide-react'
 import VideoEmbed from './VideoEmbed.jsx'
+import EntryAttachments from './EntryAttachments.jsx'
 
 function calcAge(year, profile) {
   if (!profile.birthYear || !year) return null
@@ -115,6 +116,7 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
                   <VideoEmbed videoUrl={entry.videoUrl} compact />
                 </div>
               )}
+              <EntryAttachments entry={entry} />
             </div>
           </div>
         </div>
@@ -284,6 +286,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     <VideoEmbed videoUrl={entry.videoUrl} compact />
                                   </div>
                                 )}
+                                <EntryAttachments entry={entry} />
                               </div>
                             </div>
                           )}
@@ -332,6 +335,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     <VideoEmbed videoUrl={entry.videoUrl} compact />
                                   </div>
                                 )}
+                                <EntryAttachments entry={entry} />
                               </div>
                             </div>
                           )}

@@ -10,10 +10,12 @@ export const SHARE_FIELDS = [
   { key: 'memo', label: 'メモ', group: 'entry' },
   { key: 'photo', label: '写真', group: 'entry' },
   { key: 'video', label: '動画', group: 'entry' },
+  { key: 'link', label: 'ホームページ', group: 'entry' },
+  { key: 'pdf', label: 'PDF', group: 'entry' },
 ]
 
 const DEFAULT_FIELDS = {
-  name: true, age: true, month: true, memo: true, photo: true, video: true,
+  name: true, age: true, month: true, memo: true, photo: true, video: true, link: true, pdf: true,
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

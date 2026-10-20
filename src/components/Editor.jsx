@@ -1,9 +1,25 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User, Calendar, Video, Image as ImageIcon, X, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User, Calendar, Video, Image as ImageIcon, X, Loader2, Globe, FileText } from 'lucide-react'
 import { parseVideoUrl } from '../utils/video.js'
 import VideoEmbed from './VideoEmbed.jsx'
 import { resizeImageFile, formatFileSize } from '../utils/imageResize.js'
 import { dataApi } from '../utils/api.js'
+import { linkHost, formatBytes } from './EntryAttachments.jsx'
+
+const MAX_LINKS = 5
+const MAX_FILES = 5
+const MAX_PDF_BYTES = 5 * 1024 * 1024 // 5MB
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] || '')
+    r.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'))
+    r.readAsDataURL(file)
+  })
+}
+
+const isValidHttpUrl = (url) => /^https?:\/\/[^\s]+$/i.test(url)
 
 const MONTHS = ['', '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
 
@@ -15,6 +31,8 @@ const emptyForm = {
   memo: '',
   videoUrl: '',
   photoUrl: '',
+  links: [],
+  files: [],
 }
 
 export default function Editor({ profile, entries, editingEntry, onProfileChange, onAdd, onUpdate, onDelete, onEdit, categories, session }) {
@@ -23,6 +41,11 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
   const [errors, setErrors] = useState({})
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoError, setPhotoError] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkTitle, setLinkTitle] = useState('')
+  const [linkError, setLinkError] = useState('')
+  const [fileUploading, setFileUploading] = useState(false)
+  const [fileError, setFileError] = useState('')
 
   useEffect(() => {
     if (editingEntry) {
@@ -34,7 +57,13 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
         memo: editingEntry.memo || '',
         videoUrl: editingEntry.videoUrl || '',
         photoUrl: editingEntry.photoUrl || '',
+        links: Array.isArray(editingEntry.links) ? editingEntry.links : [],
+        files: Array.isArray(editingEntry.files) ? editingEntry.files : [],
       })
+      setLinkUrl('')
+      setLinkTitle('')
+      setLinkError('')
+      setFileError('')
     }
   }, [editingEntry])
 
@@ -52,6 +81,19 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
 
   const handleSubmit = () => {
     const e = validate()
+    // 入力欄に残ったままのURLも登録する
+    let links = form.links
+    const pendingUrl = linkUrl.trim()
+    if (pendingUrl) {
+      if (!isValidHttpUrl(pendingUrl)) {
+        e.links = 'ホームページURLは http:// または https:// で始まる形で入力してください'
+      } else if (links.length >= MAX_LINKS) {
+        e.links = `ホームページURLは${MAX_LINKS}件までです`
+      } else {
+        links = [...links, { url: pendingUrl, title: linkTitle.trim() }]
+      }
+    }
+    if (fileUploading) e.files = 'PDFのアップロード完了をお待ちください'
     setErrors(e)
     if (Object.keys(e).length > 0) return
 
@@ -63,6 +105,8 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
       memo: form.memo.trim(),
       videoUrl: form.videoUrl.trim(),
       photoUrl: form.photoUrl,
+      links,
+      files: form.files,
     }
 
     if (editingEntry) {
@@ -72,6 +116,10 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
     }
     setForm(emptyForm)
     setErrors({})
+    setLinkUrl('')
+    setLinkTitle('')
+    setLinkError('')
+    setFileError('')
   }
 
   const handleCancel = () => {
@@ -79,6 +127,71 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
     setForm(emptyForm)
     setErrors({})
     setPhotoError('')
+    setLinkUrl('')
+    setLinkTitle('')
+    setLinkError('')
+    setFileError('')
+  }
+
+  const handleAddLink = () => {
+    const url = linkUrl.trim()
+    setLinkError('')
+    if (!url) return
+    if (!isValidHttpUrl(url)) {
+      setLinkError('http:// または https:// で始まるURLを入力してください')
+      return
+    }
+    if (form.links.length >= MAX_LINKS) {
+      setLinkError(`ホームページURLは${MAX_LINKS}件までです`)
+      return
+    }
+    setForm(f => ({ ...f, links: [...f.links, { url, title: linkTitle.trim() }] }))
+    setLinkUrl('')
+    setLinkTitle('')
+  }
+
+  const handleRemoveLink = (idx) => {
+    setForm(f => ({ ...f, links: f.links.filter((_, i) => i !== idx) }))
+  }
+
+  const handlePdfSelect = async (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+
+    setFileError('')
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+    if (!isPdf) {
+      setFileError('PDFファイルを選択してください')
+      return
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      setFileError(`ファイルが大きすぎます（${formatBytes(file.size)}）。5MBまでのPDFを選択してください`)
+      return
+    }
+    if (form.files.length >= MAX_FILES) {
+      setFileError(`PDFファイルは${MAX_FILES}件までです`)
+      return
+    }
+
+    setFileUploading(true)
+    try {
+      const base64 = await readFileAsBase64(file)
+      const res = await dataApi.uploadFile(session.sessionToken, file.name, 'application/pdf', base64)
+      if (!res.success) {
+        setFileError(res.error || 'アップロードに失敗しました')
+        return
+      }
+      setForm(f => ({ ...f, files: [...f.files, res.file] }))
+    } catch (err) {
+      setFileError(err.message || 'アップロードに失敗しました')
+    } finally {
+      setFileUploading(false)
+    }
+  }
+
+  const handleRemoveFile = (idx) => {
+    setForm(f => ({ ...f, files: f.files.filter((_, i) => i !== idx) }))
   }
 
   const handlePhotoSelect = async (e) => {
@@ -348,6 +461,131 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
           </div>
 
           <div>
+            <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">
+              <Globe size={12} className="inline mr-1" />ホームページURL（任意・{MAX_LINKS}件まで）
+            </label>
+            {form.links.length > 0 && (
+              <ul className="space-y-1 mb-2">
+                {form.links.map((link, idx) => (
+                  <li key={idx} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs border border-ink-200 dark:border-ink-600 bg-white dark:bg-ink-800">
+                    <Globe size={12} className="text-indigo-600 dark:text-indigo-400 flex-shrink-0" />
+                    <span className="flex-1 min-w-0 truncate text-ink-700 dark:text-ink-200" title={link.url}>
+                      {link.title || linkHost(link.url)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveLink(idx)}
+                      title="このURLを外す"
+                      className="p-0.5 rounded text-ink-400 hover:text-red-600"
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {form.links.length < MAX_LINKS && (
+              <div className="space-y-1.5">
+                <input
+                  type="url"
+                  inputMode="url"
+                  value={linkUrl}
+                  onChange={e => { setLinkUrl(e.target.value); setLinkError('') }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddLink() } }}
+                  placeholder="https://example.com/..."
+                  className={`w-full px-3 py-2 text-sm rounded-lg border
+                    bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100
+                    focus:outline-none focus:ring-2 focus:ring-indigo-500
+                    placeholder:text-ink-300 dark:placeholder:text-ink-600
+                    ${linkError || errors.links ? 'border-red-400' : 'border-ink-200 dark:border-ink-600'}`}
+                />
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={linkTitle}
+                    maxLength={100}
+                    onChange={e => setLinkTitle(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddLink() } }}
+                    placeholder="表示名（任意）例：母校のホームページ"
+                    className="flex-1 min-w-0 px-3 py-1.5 text-xs rounded-lg border border-ink-200 dark:border-ink-600
+                      bg-white dark:bg-ink-800 text-ink-900 dark:text-ink-100
+                      focus:outline-none focus:ring-2 focus:ring-indigo-500
+                      placeholder:text-ink-300 dark:placeholder:text-ink-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddLink}
+                    disabled={!linkUrl.trim()}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs border border-indigo-300 dark:border-indigo-700
+                      text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 disabled:opacity-40 transition-colors"
+                  >
+                    <Plus size={12} />
+                    追加
+                  </button>
+                </div>
+              </div>
+            )}
+            {(linkError || errors.links) && <p className="text-xs text-red-500 mt-1">{linkError || errors.links}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">
+              <FileText size={12} className="inline mr-1" />PDFファイル（任意・{MAX_FILES}件まで・各5MBまで）
+            </label>
+            {form.files.length > 0 && (
+              <ul className="space-y-1 mb-2">
+                {form.files.map((file, idx) => (
+                  <li key={file.fileId || idx} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs border border-ink-200 dark:border-ink-600 bg-white dark:bg-ink-800">
+                    <FileText size={12} className="text-vermillion flex-shrink-0" />
+                    <a
+                      href={file.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 min-w-0 truncate text-ink-700 dark:text-ink-200 hover:underline"
+                    >
+                      {file.name}
+                    </a>
+                    {file.size > 0 && <span className="text-[10px] text-ink-400">{formatBytes(file.size)}</span>}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFile(idx)}
+                      title="このPDFを外す"
+                      className="p-0.5 rounded text-ink-400 hover:text-red-600"
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {form.files.length < MAX_FILES && (
+              <label className={`flex items-center justify-center gap-2 w-full px-3 py-3 text-sm rounded-lg border border-dashed
+                border-ink-300 dark:border-ink-600 text-ink-400 dark:text-ink-500 transition-colors
+                ${fileUploading ? 'cursor-wait' : 'hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'}`}>
+                {fileUploading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    アップロード中…
+                  </>
+                ) : (
+                  <>
+                    <FileText size={14} />
+                    PDFを選択（卒業証書・記念誌・旅行のしおりなど）
+                  </>
+                )}
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  disabled={fileUploading}
+                  onChange={handlePdfSelect}
+                />
+              </label>
+            )}
+            {(fileError || errors.files) && <p className="text-xs text-red-500 mt-1">{fileError || errors.files}</p>}
+          </div>
+
+          <div>
             <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">詳細メモ（任意）</label>
             <textarea
               value={form.memo}
@@ -435,6 +673,16 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
                       {entry.photoUrl && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
                           <ImageIcon size={9} /> 写真
+                        </span>
+                      )}
+                      {entry.links?.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
+                          <Globe size={9} /> URL{entry.links.length > 1 ? `×${entry.links.length}` : ''}
+                        </span>
+                      )}
+                      {entry.files?.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
+                          <FileText size={9} /> PDF{entry.files.length > 1 ? `×${entry.files.length}` : ''}
                         </span>
                       )}
                     </div>

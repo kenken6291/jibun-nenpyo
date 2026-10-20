@@ -7,9 +7,11 @@
  * v2: 認証機能に加え、年表データ（出来事・プロフィール）を
  *     スプレッドシート側に保存するCRUD機能を追加。
  * v4: 指定した登録会員だけに年表を閲覧させる「限定共有」機能を追加。
- *     閲覧者ごとに見せる項目（名前・生年月日・年齢・月・メモ・写真・動画）と
+ *     閲覧者ごとに見せる項目（名前・年齢・月・メモ・写真・動画・URL・PDF）と
  *     カテゴリーを指定可能。設定は Shares シートに保存（初回利用時に自動作成）。
  * v4.1: GAS URLをフロントのconfig.jsへ分離、getVersion（バージョン情報）を追加。
+ * v4.2: 出来事にホームページURL（最大5件）とPDFファイル（最大5件・各5MBまで）を登録可能に。
+ *       Entriesシート12列目 attachmentsJson に保存（列見出しは自動追加）。PDFはDriveに保存。
  *
  * ■ 初回セットアップ手順
  * 1. 新しいGoogleスプレッドシートを作成する
@@ -39,7 +41,7 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.1.0';
+const APP_VERSION = '4.2.0';
 const APP_UPDATED = '2026-10-20';
 
 const SHEET_USERS = 'Users';
@@ -80,6 +82,7 @@ const ENTRIES_COL = {
   createdAt: 9,
   updatedAt: 10,
   photoUrl: 11,
+  attachmentsJson: 12,
 };
 
 // Shares シートの列番号（1始まり）
@@ -94,11 +97,15 @@ const SHARES_COL = {
 };
 const SHARES_HEADERS = ['ownerEmail', 'viewerEmail', 'label', 'fieldsJson', 'categoriesJson', 'createdAt', 'updatedAt'];
 const SHARE_MAX_VIEWERS = 30;
-const SHARE_FIELD_KEYS = ['name', 'birthday', 'age', 'month', 'memo', 'photo', 'video'];
+const SHARE_FIELD_KEYS = ['name', 'birthday', 'age', 'month', 'memo', 'photo', 'video', 'link', 'pdf'];
 const SHARE_CATEGORY_KEYS = ['work', 'family', 'hobby', 'general'];
 
 const PHOTO_DRIVE_FOLDER_NAME = 'jibun-nenpyo-photos';
 const MAX_PHOTO_BASE64_CHARS = 7000000; // 概ね5MB程度のBase64上限（GASのdoPost実質上限に対する安全マージン）
+const FILE_DRIVE_FOLDER_NAME = 'jibun-nenpyo-files';
+const MAX_FILE_BASE64_CHARS = 7000000;  // PDFも同じく約5MBまで
+const MAX_LINKS_PER_ENTRY = 5;
+const MAX_FILES_PER_ENTRY = 5;
 
 // ==========================================================
 // エントリーポイント
@@ -142,6 +149,8 @@ function doPost(e) {
         return jsonResponse(handleDeleteEntry(body));
       case 'uploadPhoto':
         return jsonResponse(handleUploadPhoto(body));
+      case 'uploadFile':
+        return jsonResponse(handleUploadFile(body));
       case 'getShareSettings':
         return jsonResponse(handleGetShareSettings(body));
       case 'saveShareSettings':
@@ -434,7 +443,9 @@ function handleAddEntry(body) {
     now,
     now,
     validation.value.photoUrl,
+    JSON.stringify({ links: validation.value.links, files: validation.value.files }),
   ]);
+  ensureEntriesAttachmentsHeader(sheet);
 
   return {
     success: true,
@@ -447,6 +458,8 @@ function handleAddEntry(body) {
       memo: validation.value.memo,
       videoUrl: validation.value.videoUrl,
       photoUrl: validation.value.photoUrl,
+      links: validation.value.links,
+      files: validation.value.files,
     },
   };
 }
@@ -479,6 +492,9 @@ function handleUpdateEntry(body) {
   sheet.getRange(rowIdx, ENTRIES_COL.memo).setValue(validation.value.memo);
   sheet.getRange(rowIdx, ENTRIES_COL.videoUrl).setValue(validation.value.videoUrl);
   sheet.getRange(rowIdx, ENTRIES_COL.photoUrl).setValue(validation.value.photoUrl);
+  sheet.getRange(rowIdx, ENTRIES_COL.attachmentsJson)
+    .setValue(JSON.stringify({ links: validation.value.links, files: validation.value.files }));
+  ensureEntriesAttachmentsHeader(sheet);
   sheet.getRange(rowIdx, ENTRIES_COL.updatedAt).setValue(new Date());
 
   return {
@@ -492,6 +508,8 @@ function handleUpdateEntry(body) {
       memo: validation.value.memo,
       videoUrl: validation.value.videoUrl,
       photoUrl: validation.value.photoUrl,
+      links: validation.value.links,
+      files: validation.value.files,
     },
   };
 }
@@ -556,6 +574,52 @@ function handleUploadPhoto(body) {
   }
 }
 
+// PDFアップロード（Googleドライブ保存）
+function handleUploadFile(body) {
+  const session = requireSession(body.sessionToken);
+  if (!session) return { success: false, error: 'セッションが無効です。再度ログインしてください。' };
+
+  const base64Data = body.base64Data || '';
+  const mimeType = body.mimeType || '';
+  let filename = String(body.filename || 'document.pdf').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+  if (!/\.pdf$/i.test(filename)) filename += '.pdf';
+
+  if (!base64Data) return { success: false, error: 'ファイルデータがありません' };
+  if (mimeType !== 'application/pdf') return { success: false, error: 'PDFファイルのみ登録できます' };
+  if (base64Data.length > MAX_FILE_BASE64_CHARS) {
+    return { success: false, error: 'ファイルサイズが大きすぎます（5MBまで）' };
+  }
+
+  try {
+    const bytes = Utilities.base64Decode(base64Data);
+    // 先頭が「%PDF」であることを確認（拡張子だけ変えた別ファイルを弾く）
+    if (bytes.length < 4 || bytes[0] !== 0x25 || bytes[1] !== 0x50 || bytes[2] !== 0x44 || bytes[3] !== 0x46) {
+      return { success: false, error: 'PDFファイルとして読み込めませんでした' };
+    }
+    const blob = Utilities.newBlob(bytes, 'application/pdf', filename);
+    const folder = getOrCreateUserFileFolder(session.email);
+    const file = folder.createFile(blob);
+    // リンクを知っている全員が閲覧可能（アプリから開くために必要）
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const fileId = file.getId();
+    return {
+      success: true,
+      file: { fileId: fileId, name: filename, url: 'https://drive.google.com/file/d/' + fileId + '/view', size: bytes.length },
+    };
+  } catch (err) {
+    console.error(err);
+    return { success: false, error: 'ファイルのアップロードに失敗しました' };
+  }
+}
+
+function getOrCreateUserFileFolder(email) {
+  const rootFolders = DriveApp.getFoldersByName(FILE_DRIVE_FOLDER_NAME);
+  const rootFolder = rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(FILE_DRIVE_FOLDER_NAME);
+  const userFolders = rootFolder.getFoldersByName(email);
+  return userFolders.hasNext() ? userFolders.next() : rootFolder.createFolder(email);
+}
+
 function getOrCreateUserPhotoFolder(email) {
   const rootFolders = DriveApp.getFoldersByName(PHOTO_DRIVE_FOLDER_NAME);
   const rootFolder = rootFolders.hasNext() ? rootFolders.next() : DriveApp.createFolder(PHOTO_DRIVE_FOLDER_NAME);
@@ -571,6 +635,7 @@ function listEntriesForEmail(email) {
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (normalizeEmail(row[ENTRIES_COL.email - 1]) !== email) continue;
+    const att = parseAttachments(row[ENTRIES_COL.attachmentsJson - 1]);
     result.push({
       id: row[ENTRIES_COL.id - 1],
       year: row[ENTRIES_COL.year - 1],
@@ -580,6 +645,8 @@ function listEntriesForEmail(email) {
       memo: row[ENTRIES_COL.memo - 1] || '',
       videoUrl: row[ENTRIES_COL.videoUrl - 1] || '',
       photoUrl: row[ENTRIES_COL.photoUrl - 1] || '',
+      links: att.links,
+      files: att.files,
     });
   }
   result.sort(function (a, b) { return a.year - b.year || (a.month || 0) - (b.month || 0); });
@@ -614,7 +681,51 @@ function validateEntryInput(input) {
   const videoUrl = String(input.videoUrl || '').slice(0, 500);
   const photoUrl = String(input.photoUrl || '').slice(0, 500);
 
-  return { value: { year: year, month: month, title: title, category: category, memo: memo, videoUrl: videoUrl, photoUrl: photoUrl } };
+  // ホームページURL
+  const rawLinks = Array.isArray(input.links) ? input.links : [];
+  if (rawLinks.length > MAX_LINKS_PER_ENTRY) return { error: 'ホームページURLは' + MAX_LINKS_PER_ENTRY + '件までです' };
+  const links = [];
+  for (let i = 0; i < rawLinks.length; i++) {
+    const url = String((rawLinks[i] && rawLinks[i].url) || '').trim();
+    if (!url) continue;
+    if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 1000) {
+      return { error: 'ホームページURLの形式が正しくありません：' + url.slice(0, 60) };
+    }
+    links.push({ url: url, title: String((rawLinks[i] && rawLinks[i].title) || '').trim().slice(0, 100) });
+  }
+
+  // PDFファイル（uploadFileで保存済みのDriveファイルのみ受け付ける）
+  const rawFiles = Array.isArray(input.files) ? input.files : [];
+  if (rawFiles.length > MAX_FILES_PER_ENTRY) return { error: 'PDFファイルは' + MAX_FILES_PER_ENTRY + '件までです' };
+  const files = [];
+  for (let i = 0; i < rawFiles.length; i++) {
+    const f = rawFiles[i] || {};
+    const fileId = String(f.fileId || '');
+    if (!/^[A-Za-z0-9_-]{10,100}$/.test(fileId)) continue;
+    files.push({
+      fileId: fileId,
+      name: String(f.name || 'document.pdf').slice(0, 120),
+      url: 'https://drive.google.com/file/d/' + fileId + '/view',
+      size: Math.max(0, parseInt(f.size, 10) || 0),
+    });
+  }
+
+  return { value: { year: year, month: month, title: title, category: category, memo: memo, videoUrl: videoUrl, photoUrl: photoUrl, links: links, files: files } };
+}
+
+function parseAttachments(raw) {
+  let obj = {};
+  try { obj = JSON.parse(raw || '{}') || {}; } catch (err) { obj = {}; }
+  return {
+    links: Array.isArray(obj.links) ? obj.links : [],
+    files: Array.isArray(obj.files) ? obj.files : [],
+  };
+}
+
+// 既存のEntriesシートに attachmentsJson 列の見出しが無ければ追加（setupSheetsの再実行不要）
+function ensureEntriesAttachmentsHeader(sheet) {
+  const cell = sheet.getRange(1, ENTRIES_COL.attachmentsJson);
+  if (!cell.getValue()) cell.setValue('attachmentsJson');
 }
 
 // ==========================================================
@@ -762,6 +873,8 @@ function handleGetSharedTimeline(body) {
         memo: f.memo ? e.memo : '',
         photoUrl: f.photo ? e.photoUrl : '',
         videoUrl: f.video ? e.videoUrl : '',
+        links: f.link ? e.links : [],
+        files: f.pdf ? e.files : [],
       };
     });
 
@@ -1010,7 +1123,7 @@ function setupSheets() {
   const usersHeaders = ['email', 'nickname', 'fullName', 'passwordHash', 'salt', 'mustChangePassword', 'createdAt', 'updatedAt', 'profileJson'];
   const sessionsHeaders = ['token', 'email', 'createdAt', 'expiresAt'];
   const consentHeaders = ['email', 'timestamp', 'event', 'termsVersion'];
-  const entriesHeaders = ['id', 'email', 'year', 'month', 'title', 'category', 'memo', 'videoUrl', 'createdAt', 'updatedAt', 'photoUrl'];
+  const entriesHeaders = ['id', 'email', 'year', 'month', 'title', 'category', 'memo', 'videoUrl', 'createdAt', 'updatedAt', 'photoUrl', 'attachmentsJson'];
 
   ensureSheetWithHeaders(ss, SHEET_USERS, usersHeaders);
   ensureSheetWithHeaders(ss, SHEET_SESSIONS, sessionsHeaders);
@@ -1029,6 +1142,7 @@ function setupSheets() {
   if (entriesSheet.getLastColumn() < 11) {
     entriesSheet.getRange(1, 11).setValue('photoUrl');
   }
+  ensureEntriesAttachmentsHeader(entriesSheet);
 
   Logger.log('セットアップが完了しました。Users / Sessions / ConsentLog / Entries / Shares シートを確認してください。');
 }

@@ -10,7 +10,7 @@ export const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwGBp9Nq-6Qq
 // 画面（フロントエンド）のバージョン
 // 機能を追加・修正したら上げる。GAS側 Code.gs の APP_VERSION と揃えておくと、
 // GASの再デプロイ忘れを画面上で検知できます。
-export const APP_VERSION = '4.1.0'
+export const APP_VERSION = '4.2.0'
 
 // ビルド日時（vite.config.js で自動埋め込み）
 // eslint-disable-next-line no-undef

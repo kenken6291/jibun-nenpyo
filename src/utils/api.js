@@ -56,6 +56,9 @@ export const dataApi = {
   deleteEntry: (sessionToken, id) => callApi('deleteEntry', { sessionToken, id }),
   uploadPhoto: (sessionToken, filename, mimeType, base64Data) =>
     callApi('uploadPhoto', { sessionToken, filename, mimeType, base64Data }),
+  // PDFファイルのアップロード（Googleドライブ保存）
+  uploadFile: (sessionToken, filename, mimeType, base64Data) =>
+    callApi('uploadFile', { sessionToken, filename, mimeType, base64Data }),
 }
 
 // 年表の限定共有（指定した登録会員だけが閲覧できる）用API

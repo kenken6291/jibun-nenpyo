@@ -10,7 +10,8 @@
  *     閲覧者ごとに見せる項目（名前・年齢・月・メモ・写真・動画・URL・PDF）と
  *     カテゴリーを指定可能。設定は Shares シートに保存（初回利用時に自動作成）。
  * v4.1: GAS URLをフロントのconfig.jsへ分離、getVersion（バージョン情報）を追加。
- * v4.2: 出来事にホームページURL（最大5件）とPDFファイル（最大5件・各5MBまで）を登録可能に。
+ * v4.2: 出来事にホームページURL（最大5件）とPDFファイル（最大5件）を登録可能に。
+ * v4.2.1: PDFの上限を1件10MBに拡大。
  *       Entriesシート12列目 attachmentsJson に保存（列見出しは自動追加）。PDFはDriveに保存。
  *
  * ■ 初回セットアップ手順
@@ -41,7 +42,7 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.2.0';
+const APP_VERSION = '4.2.1';
 const APP_UPDATED = '2026-10-20';
 
 const SHEET_USERS = 'Users';
@@ -103,7 +104,8 @@ const SHARE_CATEGORY_KEYS = ['work', 'family', 'hobby', 'general'];
 const PHOTO_DRIVE_FOLDER_NAME = 'jibun-nenpyo-photos';
 const MAX_PHOTO_BASE64_CHARS = 7000000; // 概ね5MB程度のBase64上限（GASのdoPost実質上限に対する安全マージン）
 const FILE_DRIVE_FOLDER_NAME = 'jibun-nenpyo-files';
-const MAX_FILE_BASE64_CHARS = 7000000;  // PDFも同じく約5MBまで
+const MAX_PDF_BYTES = 10 * 1024 * 1024;  // PDFは1件10MBまで
+const MAX_FILE_BASE64_CHARS = 14000000; // 10MBをBase64化すると約13.4M文字になるため少し余裕を持たせる
 const MAX_LINKS_PER_ENTRY = 5;
 const MAX_FILES_PER_ENTRY = 5;
 
@@ -587,11 +589,14 @@ function handleUploadFile(body) {
   if (!base64Data) return { success: false, error: 'ファイルデータがありません' };
   if (mimeType !== 'application/pdf') return { success: false, error: 'PDFファイルのみ登録できます' };
   if (base64Data.length > MAX_FILE_BASE64_CHARS) {
-    return { success: false, error: 'ファイルサイズが大きすぎます（5MBまで）' };
+    return { success: false, error: 'ファイルサイズが大きすぎます（10MBまで）' };
   }
 
   try {
     const bytes = Utilities.base64Decode(base64Data);
+    if (bytes.length > MAX_PDF_BYTES) {
+      return { success: false, error: 'ファイルサイズが大きすぎます（10MBまで）' };
+    }
     // 先頭が「%PDF」であることを確認（拡張子だけ変えた別ファイルを弾く）
     if (bytes.length < 4 || bytes[0] !== 0x25 || bytes[1] !== 0x50 || bytes[2] !== 0x44 || bytes[3] !== 0x46) {
       return { success: false, error: 'PDFファイルとして読み込めませんでした' };

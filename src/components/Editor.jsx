@@ -8,7 +8,7 @@ import { linkHost, formatBytes } from './EntryAttachments.jsx'
 
 const MAX_LINKS = 5
 const MAX_FILES = 5
-const MAX_PDF_BYTES = 5 * 1024 * 1024 // 5MB
+const MAX_PDF_BYTES = 10 * 1024 * 1024 // 10MB
 
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -166,7 +166,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
       return
     }
     if (file.size > MAX_PDF_BYTES) {
-      setFileError(`ファイルが大きすぎます（${formatBytes(file.size)}）。5MBまでのPDFを選択してください`)
+      setFileError(`ファイルが大きすぎます（${formatBytes(file.size)}）。10MBまでのPDFを選択してください`)
       return
     }
     if (form.files.length >= MAX_FILES) {
@@ -530,7 +530,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
 
           <div>
             <label className="block text-xs text-ink-500 dark:text-ink-400 mb-1">
-              <FileText size={12} className="inline mr-1" />PDFファイル（任意・{MAX_FILES}件まで・各5MBまで）
+              <FileText size={12} className="inline mr-1" />PDFファイル（任意・{MAX_FILES}件まで・各10MBまで）
             </label>
             {form.files.length > 0 && (
               <ul className="space-y-1 mb-2">

@@ -1,8 +1,8 @@
-import { Sun, Moon, Download, Upload } from 'lucide-react'
+import { Sun, Moon, Download, Upload, Share2, Users } from 'lucide-react'
 import { useRef } from 'react'
 import AccountMenu from './auth/AccountMenu.jsx'
 
-export default function Header({ darkMode, onToggleDark, onExport, onImport, session, onLogout, onNicknameChanged }) {
+export default function Header({ darkMode, onToggleDark, onExport, onImport, session, onLogout, onNicknameChanged, onOpenShare, onOpenShared }) {
   const fileInputRef = useRef()
 
   return (
@@ -31,11 +31,33 @@ export default function Header({ darkMode, onToggleDark, onExport, onImport, ses
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 md:gap-2">
+      <div className="flex items-center gap-1 md:gap-2">
+        <button
+          onClick={onOpenShared}
+          title="共有された年表を見る"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-ink-600 dark:text-ink-300
+            hover:bg-ink-100 dark:hover:bg-ink-700 rounded-lg transition-colors"
+        >
+          <Users size={14} />
+          <span className="hidden lg:inline">共有された年表</span>
+        </button>
+
+        <button
+          onClick={onOpenShare}
+          title="年表の共有設定"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-indigo-700 dark:text-indigo-400
+            hover:bg-indigo-50 dark:hover:bg-indigo-950 rounded-lg transition-colors"
+        >
+          <Share2 size={14} />
+          <span className="hidden sm:inline">共有設定</span>
+        </button>
+
+        <div className="w-px h-5 bg-ink-200 dark:bg-ink-700 mx-0.5" />
+
         <button
           onClick={onExport}
           title="JSONで保存"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-ink-600 dark:text-ink-300
             hover:bg-ink-100 dark:hover:bg-ink-700 rounded-lg transition-colors"
         >
           <Download size={14} />
@@ -45,7 +67,7 @@ export default function Header({ darkMode, onToggleDark, onExport, onImport, ses
         <button
           onClick={() => fileInputRef.current?.click()}
           title="JSONから読み込み"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-ink-600 dark:text-ink-300
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-ink-600 dark:text-ink-300
             hover:bg-ink-100 dark:hover:bg-ink-700 rounded-lg transition-colors"
         >
           <Upload size={14} />

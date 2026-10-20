@@ -3,6 +3,7 @@ import LoginForm from './LoginForm.jsx'
 import RegisterForm from './RegisterForm.jsx'
 import ForgotPasswordForm from './ForgotPasswordForm.jsx'
 import ChangePasswordForm from './ChangePasswordForm.jsx'
+import VersionInfo from '../VersionInfo.jsx'
 
 export default function AuthScreen({ onAuthenticated }) {
   const [mode, setMode] = useState('login') // login | register | forgot | changePassword
@@ -52,6 +53,7 @@ export default function AuthScreen({ onAuthenticated }) {
         <p className="text-center text-[11px] text-ink-300 dark:text-ink-600 mt-4 leading-relaxed">
           本サービスは無料の個人ボランティア運営です。
         </p>
+        <VersionInfo className="text-center mt-2" />
       </div>
     </div>
   )

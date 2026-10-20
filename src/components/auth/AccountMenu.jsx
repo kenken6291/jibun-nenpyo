@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { UserCircle, LogOut, Pencil, Check, X } from 'lucide-react'
 import { authApi } from '../../utils/api.js'
+import VersionInfo from '../VersionInfo.jsx'
 
 export default function AccountMenu({ session, onLogout, onNicknameChanged }) {
   const [open, setOpen] = useState(false)
@@ -70,6 +71,7 @@ export default function AccountMenu({ session, onLogout, onNicknameChanged }) {
                 <LogOut size={13} />
                 ログアウト
               </button>
+              <VersionInfo className="mt-3 pt-2 border-t border-ink-100 dark:border-ink-700" />
             </>
           ) : (
             <div className="space-y-2">

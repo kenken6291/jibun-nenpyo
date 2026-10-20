@@ -3,7 +3,10 @@ import historicalEvents from './data/historicalEvents.json'
 import Editor from './components/Editor.jsx'
 import Timeline from './components/Timeline.jsx'
 import Header from './components/Header.jsx'
-import { dataApi } from './utils/api.js'
+import ShareSettingsModal from './components/share/ShareSettingsModal.jsx'
+import SharedListModal from './components/share/SharedListModal.jsx'
+import { ArrowLeft, Eye, Loader2 } from 'lucide-react'
+import { dataApi, shareApi } from './utils/api.js'
 
 const defaultProfile = {
   name: '',
@@ -42,6 +45,39 @@ export default function App({ session, onLogout, onNicknameChanged }) {
   const profileLoadedRef = useRef(false)
   const profileSaveTimer = useRef(null)
 
+  // ---- 限定共有 ----
+  const [shareOpen, setShareOpen] = useState(false)
+  const [sharedListOpen, setSharedListOpen] = useState(false)
+  // 閲覧中の他会員の年表 { ownerId, ownerNickname, profile, entries, updatedAt }
+  const [viewing, setViewing] = useState(null)
+  const [viewingLoading, setViewingLoading] = useState(false)
+  const [viewingError, setViewingError] = useState('')
+
+  const openSharedTimeline = useCallback(async (item) => {
+    setSharedListOpen(false)
+    setViewingError('')
+    setViewingLoading(true)
+    setViewing({ ownerId: item.ownerId, ownerNickname: item.ownerNickname, profile: {}, entries: [] })
+    try {
+      const res = await shareApi.getSharedTimeline(session.sessionToken, item.ownerId)
+      if (!res.success) {
+        setViewingError(res.error || '年表の読み込みに失敗しました')
+        return
+      }
+      setViewing({
+        ownerId: item.ownerId,
+        ownerNickname: res.ownerNickname || item.ownerNickname,
+        profile: res.profile || {},
+        entries: res.entries || [],
+        updatedAt: res.updatedAt,
+      })
+    } catch {
+      setViewingError('通信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setViewingLoading(false)
+    }
+  }, [session.sessionToken])
+
   // 初回ロード: サーバー（スプレッドシート）から年表データを取得
   const loadData = useCallback(() => {
     setLoading(true)
@@ -78,9 +114,10 @@ export default function App({ session, onLogout, onNicknameChanged }) {
     if (!profileLoadedRef.current) return
     if (profileSaveTimer.current) clearTimeout(profileSaveTimer.current)
     profileSaveTimer.current = setTimeout(() => {
-      dataApi.updateProfile(session.sessionToken, profile).catch(() => {
-        setSaveError('プロフィールの保存に失敗しました')
-      })
+      dataApi.updateProfile(session.sessionToken, profile)
+        .catch(() => {
+          setSaveError('プロフィールの保存に失敗しました')
+        })
     }, 800)
     return () => clearTimeout(profileSaveTimer.current)
   }, [profile, session.sessionToken])
@@ -130,7 +167,7 @@ export default function App({ session, onLogout, onNicknameChanged }) {
     } catch {
       setSaveError('通信に失敗しました。時間をおいて再度お試しください。')
     }
-  }, [])
+  }, [session.sessionToken])
 
   const exportJSON = () => {
     const data = JSON.stringify({ profile, entries }, null, 2)
@@ -165,7 +202,7 @@ export default function App({ session, onLogout, onNicknameChanged }) {
             }
           }
         }
-        alert('データを読み込みました（既存のデータに追加されました）')
+          alert('データを読み込みました（既存のデータに追加されました）')
       } catch {
         alert('JSONファイルの読み込みに失敗しました')
       }
@@ -185,7 +222,25 @@ export default function App({ session, onLogout, onNicknameChanged }) {
           session={session}
           onLogout={onLogout}
           onNicknameChanged={onNicknameChanged}
+          onOpenShare={() => setShareOpen(true)}
+          onOpenShared={() => setSharedListOpen(true)}
         />
+
+        {shareOpen && (
+          <ShareSettingsModal
+            session={session}
+            categories={CATEGORIES}
+            onClose={() => setShareOpen(false)}
+          />
+        )}
+
+        {sharedListOpen && (
+          <SharedListModal
+            session={session}
+            onClose={() => setSharedListOpen(false)}
+            onOpen={openSharedTimeline}
+          />
+        )}
 
         {saveError && (
           <div className="no-print bg-red-50 dark:bg-red-950 border-b border-red-200 dark:border-red-800 px-4 py-1.5 text-xs text-red-600 dark:text-red-300 flex items-center justify-between">
@@ -194,6 +249,52 @@ export default function App({ session, onLogout, onNicknameChanged }) {
           </div>
         )}
 
+        {viewing ? (
+          <>
+            {/* 共有された年表の閲覧モード（閲覧専用） */}
+            <div className="no-print sticky top-14 z-20 flex items-center justify-between gap-2 px-4 py-2
+              bg-indigo-50 dark:bg-indigo-950 border-b border-indigo-200 dark:border-indigo-800">
+              <div className="flex items-center gap-1.5 min-w-0 text-xs text-indigo-800 dark:text-indigo-200">
+                <Eye size={14} className="flex-shrink-0" />
+                <span className="truncate">{viewing.ownerNickname || '会員'}さんの年表（閲覧専用）</span>
+              </div>
+              <button
+                onClick={() => { setViewing(null); setViewingError('') }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs bg-indigo-700 hover:bg-indigo-800 text-white flex-shrink-0"
+              >
+                <ArrowLeft size={13} />
+                自分の年表に戻る
+              </button>
+            </div>
+            <main className="flex-1 flex flex-col overflow-y-auto custom-scroll">
+              {viewingLoading ? (
+                <div className="flex-1 flex items-center justify-center gap-2 text-sm text-ink-400 dark:text-ink-500 p-8">
+                  <Loader2 size={16} className="animate-spin" /> 年表を読み込み中…
+                </div>
+              ) : viewingError ? (
+                <div className="flex-1 flex items-center justify-center p-8 text-center">
+                  <p className="text-sm text-red-500">{viewingError}</p>
+                </div>
+              ) : viewing.entries.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center p-8 text-center">
+                  <p className="text-sm text-ink-400 dark:text-ink-500">公開されている出来事はまだありません</p>
+                </div>
+              ) : (
+                <Timeline
+                  profile={{
+                    ...defaultProfile,
+                    ...viewing.profile,
+                    name: viewing.profile.name || `${viewing.ownerNickname || '会員'}さん`,
+                  }}
+                  entries={viewing.entries}
+                  categories={CATEGORIES}
+                  historicalEvents={historicalEvents}
+                />
+              )}
+            </main>
+          </>
+        ) : (
+        <>
         {/* Mobile tab bar */}
         <div className="md:hidden flex border-b border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 no-print sticky top-14 z-20">
           <button
@@ -268,6 +369,8 @@ export default function App({ session, onLogout, onNicknameChanged }) {
               />
             </div>
           </main>
+        )}
+        </>
         )}
       </div>
     </div>

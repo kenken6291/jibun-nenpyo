@@ -1,6 +1,7 @@
-// GAS(Google Apps Script) Web App のURL
-// デプロイ後に発行される「.../exec」で終わるURLに書き換えてください
-export const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwGBp9Nq-6QqbOx1-uhk-tVK1Es2-aCtfZaERt9HPawi1i9DxQ3nrWM4Uo_5mmUydaK_Q/exec'
+// GAS(Google Apps Script) Web App のURLは src/config.js で設定します
+import { GAS_API_URL } from '../config.js'
+
+export { GAS_API_URL }
 
 const SESSION_KEY = 'jibun-nenpyo-session'
 
@@ -55,4 +56,17 @@ export const dataApi = {
   deleteEntry: (sessionToken, id) => callApi('deleteEntry', { sessionToken, id }),
   uploadPhoto: (sessionToken, filename, mimeType, base64Data) =>
     callApi('uploadPhoto', { sessionToken, filename, mimeType, base64Data }),
+}
+
+// 年表の限定共有（指定した登録会員だけが閲覧できる）用API
+export const shareApi = {
+  getShareSettings: (sessionToken) => callApi('getShareSettings', { sessionToken }),
+  saveShareSettings: (sessionToken, shares) => callApi('saveShareSettings', { sessionToken, shares }),
+  listSharedWithMe: (sessionToken) => callApi('listSharedWithMe', { sessionToken }),
+  getSharedTimeline: (sessionToken, ownerId) => callApi('getSharedTimeline', { sessionToken, ownerId }),
+}
+
+// サーバー（GAS）のバージョン取得（認証不要）
+export const systemApi = {
+  getVersion: () => callApi('getVersion'),
 }

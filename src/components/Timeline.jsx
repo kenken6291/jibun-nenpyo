@@ -88,7 +88,7 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
   return (
     <div className={`flex w-full gap-4 md:gap-6 items-start timeline-entry`}>
       {/* Left side content (for alternating layout) */}
-      <div className={`flex-1 ${isLeft ? '' : 'order-2'}`}>
+      <div className={`flex-1 min-w-0 ${isLeft ? '' : 'order-2'}`}>
         <div className={`rounded-xl border p-3 shadow-sm transition-all hover:shadow-md
           ${cat.lightBg} ${cat.darkBg} ${cat.borderColor.replace('border-', 'border-').replace('700', '200').replace('600', '200').replace('500', '200')}
           border-l-4 ${cat.borderColor}`}
@@ -103,11 +103,11 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
                   <span className="text-[10px] text-ink-400 dark:text-ink-500">{entry.month}月</span>
                 )}
               </div>
-              <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug">
+              <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug break-words">
                 {entry.title}
               </p>
               {entry.memo && (
-                <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5 leading-relaxed">
+                <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-1.5 leading-relaxed break-words whitespace-pre-wrap">
                   {entry.memo}
                 </p>
               )}
@@ -140,7 +140,7 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
       </div>
 
       {/* Right side spacer (for alternating) */}
-      <div className="flex-1" />
+      <div className="flex-1 min-w-0" />
     </div>
   )
 }
@@ -249,7 +249,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                     return (
                       <div key={entry.id} className="flex items-start gap-3 md:gap-4">
                         {/* Left slot */}
-                        <div className={`flex-1 ${isLeft ? '' : 'invisible'}`}>
+                        <div className={`flex-1 min-w-0 ${isLeft ? '' : 'invisible'}`}>
                           {isLeft && (
                             <div>
                               <div className={`rounded-xl border p-3 shadow-sm hover:shadow-md transition-shadow
@@ -263,11 +263,11 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     <span className="text-[10px] text-ink-300 dark:text-ink-600">{entry.month}月</span>
                                   )}
                                 </div>
-                                <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug">
+                                <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug break-words">
                                   {entry.title}
                                 </p>
                                 {entry.memo && (
-                                  <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed">
+                                  <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed break-words whitespace-pre-wrap">
                                     {entry.memo}
                                   </p>
                                 )}
@@ -298,7 +298,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                         </div>
 
                         {/* Right slot */}
-                        <div className={`flex-1 ${!isLeft ? '' : 'invisible'}`}>
+                        <div className={`flex-1 min-w-0 ${!isLeft ? '' : 'invisible'}`}>
                           {!isLeft && (
                             <div>
                               <div className={`rounded-xl border p-3 shadow-sm hover:shadow-md transition-shadow
@@ -312,11 +312,11 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     <span className="text-[10px] text-ink-300 dark:text-ink-600">{entry.month}月</span>
                                   )}
                                 </div>
-                                <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug">
+                                <p className="text-sm font-semibold text-ink-800 dark:text-ink-100 leading-snug break-words">
                                   {entry.title}
                                 </p>
                                 {entry.memo && (
-                                  <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed">
+                                  <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1.5 leading-relaxed break-words whitespace-pre-wrap">
                                     {entry.memo}
                                   </p>
                                 )}

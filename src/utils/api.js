@@ -65,6 +65,9 @@ export const dataApi = {
 export const shareApi = {
   getShareSettings: (sessionToken) => callApi('getShareSettings', { sessionToken }),
   saveShareSettings: (sessionToken, shares) => callApi('saveShareSettings', { sessionToken, shares }),
+  // 公開／非公開の即時切り替え（viewerEmails: 対象者の配列、enabled: true=公開 / false=非公開）
+  setShareEnabled: (sessionToken, viewerEmails, enabled) =>
+    callApi('setShareEnabled', { sessionToken, viewerEmails, enabled }),
   listSharedWithMe: (sessionToken) => callApi('listSharedWithMe', { sessionToken }),
   getSharedTimeline: (sessionToken, ownerId) => callApi('getSharedTimeline', { sessionToken, ownerId }),
 }

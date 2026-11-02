@@ -13,6 +13,11 @@
  * v4.2: 出来事にホームページURL（最大5件）とPDFファイル（最大5件）を登録可能に。
  * v4.2.1: PDFの上限を1件10MBに拡大。
  *       Entriesシート12列目 attachmentsJson に保存（列見出しは自動追加）。PDFはDriveに保存。
+ * v4.4: 共有の「公開／非公開」切り替えと一覧管理を追加。
+ *       閲覧者ごとに enabled（公開中かどうか）・group（家族/友人/その他）・
+ *       lastViewedAt（最終閲覧日時）を Shares シート8〜10列目に保存（列見出しは自動追加）。
+ *       非公開にした閲覧者には年表が一覧にも表示されず、閲覧もできない（設定は残る）。
+ *       setShareEnabled で1人／グループ／全員の公開状態を即時に切り替えられる。
  *
  * ■ 初回セットアップ手順
  * 1. 新しいGoogleスプレッドシートを作成する
@@ -42,8 +47,8 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.3.0';
-const APP_UPDATED = '2026-10-20';
+const APP_VERSION = '4.4.0';
+const APP_UPDATED = '2026-11-03';
 
 const SHEET_USERS = 'Users';
 const SHEET_SESSIONS = 'Sessions';
@@ -95,8 +100,13 @@ const SHARES_COL = {
   categoriesJson: 5,
   createdAt: 6,
   updatedAt: 7,
+  enabled: 8,       // v4.4: 公開中=TRUE / 非公開=FALSE（空欄は旧データなので公開扱い）
+  group: 9,         // v4.4: family / friend / other
+  lastViewedAt: 10, // v4.4: 閲覧者が最後に年表を開いた日時
 };
-const SHARES_HEADERS = ['ownerEmail', 'viewerEmail', 'label', 'fieldsJson', 'categoriesJson', 'createdAt', 'updatedAt'];
+const SHARES_HEADERS = ['ownerEmail', 'viewerEmail', 'label', 'fieldsJson', 'categoriesJson', 'createdAt', 'updatedAt', 'enabled', 'group', 'lastViewedAt'];
+const SHARE_GROUP_KEYS = ['family', 'friend', 'other'];
+const SHARE_VIEW_LOG_INTERVAL_MS = 30 * 60 * 1000; // 最終閲覧日時の書き込みは30分に1回まで
 const SHARE_MAX_VIEWERS = 30;
 const SHARE_FIELD_KEYS = ['name', 'birthday', 'age', 'month', 'memo', 'photo', 'video', 'link', 'pdf'];
 const SHARE_CATEGORY_KEYS = ['work', 'family', 'hobby', 'general'];
@@ -157,6 +167,8 @@ function doPost(e) {
         return jsonResponse(handleGetShareSettings(body));
       case 'saveShareSettings':
         return jsonResponse(handleSaveShareSettings(body));
+      case 'setShareEnabled':
+        return jsonResponse(handleSetShareEnabled(body));
       case 'listSharedWithMe':
         return jsonResponse(handleListSharedWithMe(body));
       case 'getSharedTimeline':
@@ -744,10 +756,20 @@ function handleGetShareSettings(body) {
   if (!session) return { success: false, error: 'セッションが無効です。再度ログインしてください。' };
 
   const shares = readShareRows().filter(function (r) { return r.ownerEmail === session.email; })
-    .map(function (r) {
-      return { viewerEmail: r.viewerEmail, label: r.label, fields: r.fields, categories: r.categories };
-    });
+    .map(toShareSettingResponse);
   return { success: true, shares: shares };
+}
+
+function toShareSettingResponse(r) {
+  return {
+    viewerEmail: r.viewerEmail,
+    label: r.label,
+    fields: r.fields,
+    categories: r.categories,
+    enabled: r.enabled,
+    group: r.group,
+    lastViewedAt: r.lastViewedAt,
+  };
 }
 
 function handleSaveShareSettings(body) {
@@ -787,26 +809,41 @@ function handleSaveShareSettings(body) {
     });
     if (categories.length === 0) return { success: false, error: viewerEmail + ' に見せるカテゴリーを1つ以上選んでください' };
 
-    list.push({ viewerEmail: viewerEmail, label: String(s.label || '').trim().slice(0, 30), fields: fields, categories: categories });
+    const group = SHARE_GROUP_KEYS.indexOf(s.group) !== -1 ? s.group : 'other';
+    const enabled = s.enabled === undefined ? true : !!s.enabled;
+
+    list.push({
+      viewerEmail: viewerEmail,
+      label: String(s.label || '').trim().slice(0, 30),
+      fields: fields,
+      categories: categories,
+      enabled: enabled,
+      group: group,
+      lastViewedAt: '',
+    });
   }
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
     const sheet = getSharesSheet();
-    const data = sheet.getDataRange().getValues();
+    const data = sheet.getRange(1, 1, sheet.getLastRow(), SHARES_HEADERS.length).getValues();
     const createdMap = {};
-    // 自分が共有元の行を下から削除（作成日時は引き継ぐ）
+    const viewedMap = {};
+    // 自分が共有元の行を下から削除（作成日時・最終閲覧日時は引き継ぐ）
     for (let i = data.length - 1; i >= 1; i--) {
       if (normalizeEmail(data[i][SHARES_COL.ownerEmail - 1]) === session.email) {
-        createdMap[normalizeEmail(data[i][SHARES_COL.viewerEmail - 1])] = data[i][SHARES_COL.createdAt - 1];
+        const v = normalizeEmail(data[i][SHARES_COL.viewerEmail - 1]);
+        createdMap[v] = data[i][SHARES_COL.createdAt - 1];
+        viewedMap[v] = data[i][SHARES_COL.lastViewedAt - 1] || '';
         sheet.deleteRow(i + 1);
       }
     }
     const now = new Date();
     const rows = list.map(function (s) {
+      s.lastViewedAt = toIsoOrEmpty(viewedMap[s.viewerEmail]);
       return [session.email, s.viewerEmail, s.label, JSON.stringify(s.fields), JSON.stringify(s.categories),
-        createdMap[s.viewerEmail] || now, now];
+        createdMap[s.viewerEmail] || now, now, s.enabled, s.group, viewedMap[s.viewerEmail] || ''];
     });
     if (rows.length > 0) {
       sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, SHARES_HEADERS.length).setValues(rows);
@@ -818,11 +855,49 @@ function handleSaveShareSettings(body) {
   return { success: true, shares: list };
 }
 
+// 公開／非公開の即時切り替え（1人・グループ・全員をまとめて指定可）
+// body.viewerEmails: 対象の閲覧者メールアドレス配列 / body.enabled: true=公開, false=非公開
+function handleSetShareEnabled(body) {
+  const session = requireSession(body.sessionToken);
+  if (!session) return { success: false, error: 'セッションが無効です。再度ログインしてください。' };
+
+  const targets = Array.isArray(body.viewerEmails) ? body.viewerEmails : [];
+  if (targets.length === 0) return { success: false, error: '対象の閲覧者が指定されていません' };
+  if (targets.length > SHARE_MAX_VIEWERS) return { success: false, error: 'リクエストの形式が不正です' };
+  const targetSet = {};
+  targets.forEach(function (t) { targetSet[normalizeEmail(String(t || ''))] = true; });
+  const enabled = !!body.enabled;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  let updated = 0;
+  try {
+    const sheet = getSharesSheet();
+    const data = sheet.getRange(1, 1, sheet.getLastRow(), SHARES_HEADERS.length).getValues();
+    const now = new Date();
+    for (let i = 1; i < data.length; i++) {
+      if (normalizeEmail(data[i][SHARES_COL.ownerEmail - 1]) !== session.email) continue;
+      if (!targetSet[normalizeEmail(data[i][SHARES_COL.viewerEmail - 1])]) continue;
+      sheet.getRange(i + 1, SHARES_COL.enabled).setValue(enabled);
+      sheet.getRange(i + 1, SHARES_COL.updatedAt).setValue(now);
+      updated++;
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  if (updated === 0) return { success: false, error: '対象の閲覧者が見つかりません。画面を開き直してください。' };
+
+  const shares = readShareRows().filter(function (r) { return r.ownerEmail === session.email; })
+    .map(toShareSettingResponse);
+  return { success: true, updated: updated, shares: shares };
+}
+
 function handleListSharedWithMe(body) {
   const session = requireSession(body.sessionToken);
   if (!session) return { success: false, error: 'セッションが無効です。再度ログインしてください。' };
 
-  const mine = readShareRows().filter(function (r) { return r.viewerEmail === session.email; });
+  // 非公開（enabled=false）にされている共有は表示しない
+  const mine = readShareRows().filter(function (r) { return r.viewerEmail === session.email && r.enabled; });
   if (mine.length === 0) return { success: true, items: [] };
 
   const nicknames = getNicknameMap();
@@ -847,9 +922,11 @@ function handleGetSharedTimeline(body) {
 
   const ownerId = String(body.ownerId || '');
   const share = readShareRows().filter(function (r) {
-    return r.viewerEmail === session.email && shareOwnerId(r.ownerEmail) === ownerId;
+    return r.viewerEmail === session.email && r.enabled && shareOwnerId(r.ownerEmail) === ownerId;
   })[0];
   if (!share) return { success: false, error: 'この年表の閲覧権限がありません（共有が解除された可能性があります）' };
+
+  recordShareView(share);
 
   const usersSheet = getSheet(SHEET_USERS);
   const rowIdx = findUserRow(usersSheet, share.ownerEmail);
@@ -896,12 +973,28 @@ function getSharesSheet() {
     sheet = ss.insertSheet(SHEET_SHARES);
     sheet.appendRow(SHARES_HEADERS);
     sheet.setFrozenRows(1);
+  } else {
+    ensureSharesHeaders(sheet);
   }
   return sheet;
 }
 
+// v4.3以前のSharesシートに enabled / group / lastViewedAt 列の見出しを追加
+function ensureSharesHeaders(sheet) {
+  if (sheet.getLastColumn() >= SHARES_HEADERS.length) return;
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(SHARES_HEADERS);
+    sheet.setFrozenRows(1);
+    return;
+  }
+  sheet.getRange(1, 1, 1, SHARES_HEADERS.length).setValues([SHARES_HEADERS]);
+}
+
 function readShareRows() {
-  const data = getSharesSheet().getDataRange().getValues();
+  const sheet = getSharesSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const data = sheet.getRange(1, 1, lastRow, SHARES_HEADERS.length).getValues();
   const rows = [];
   for (let i = 1; i < data.length; i++) {
     const ownerEmail = normalizeEmail(String(data[i][SHARES_COL.ownerEmail - 1] || ''));
@@ -913,15 +1006,51 @@ function readShareRows() {
     try { categories = JSON.parse(data[i][SHARES_COL.categoriesJson - 1] || '[]'); } catch (err) { categories = []; }
     const safeFields = {};
     SHARE_FIELD_KEYS.forEach(function (k) { safeFields[k] = !!fields[k]; });
+    const enabledRaw = data[i][SHARES_COL.enabled - 1];
+    const groupRaw = String(data[i][SHARES_COL.group - 1] || '');
     rows.push({
+      rowNumber: i + 1,
       ownerEmail: ownerEmail,
       viewerEmail: viewerEmail,
       label: String(data[i][SHARES_COL.label - 1] || ''),
       fields: safeFields,
       categories: Array.isArray(categories) ? categories : [],
+      enabled: parseShareEnabled(enabledRaw),
+      group: SHARE_GROUP_KEYS.indexOf(groupRaw) !== -1 ? groupRaw : 'other',
+      lastViewedAt: toIsoOrEmpty(data[i][SHARES_COL.lastViewedAt - 1]),
     });
   }
   return rows;
+}
+
+// 空欄（v4.3以前のデータ）は公開中として扱う
+function parseShareEnabled(v) {
+  if (v === '' || v === null || v === undefined) return true;
+  if (v === true || v === false) return v;
+  return String(v).toUpperCase() !== 'FALSE';
+}
+
+function toIsoOrEmpty(v) {
+  if (!v) return '';
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
+// 閲覧者が年表を開いた日時を記録（書き込み回数を抑えるため30分以内の再閲覧は記録しない）
+function recordShareView(share) {
+  try {
+    const last = share.lastViewedAt ? new Date(share.lastViewedAt).getTime() : 0;
+    const now = new Date();
+    if (now.getTime() - last < SHARE_VIEW_LOG_INTERVAL_MS) return;
+    const sheet = getSharesSheet();
+    const row = share.rowNumber;
+    // 行がずれていないか確認してから書き込む
+    const vals = sheet.getRange(row, 1, 1, 2).getValues()[0];
+    if (normalizeEmail(vals[0]) !== share.ownerEmail || normalizeEmail(vals[1]) !== share.viewerEmail) return;
+    sheet.getRange(row, SHARES_COL.lastViewedAt).setValue(now);
+  } catch (err) {
+    console.error(err); // 記録に失敗しても閲覧自体は続ける
+  }
 }
 
 // メールアドレスを推測されないよう、秘密の値を混ぜてハッシュ化した共有元ID
@@ -1148,6 +1277,7 @@ function setupSheets() {
     entriesSheet.getRange(1, 11).setValue('photoUrl');
   }
   ensureEntriesAttachmentsHeader(entriesSheet);
+  ensureSharesHeaders(ss.getSheetByName(SHEET_SHARES));
 
   Logger.log('セットアップが完了しました。Users / Sessions / ConsentLog / Entries / Shares シートを確認してください。');
 }

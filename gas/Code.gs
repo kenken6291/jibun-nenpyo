@@ -42,7 +42,7 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.2.1';
+const APP_VERSION = '4.3.0';
 const APP_UPDATED = '2026-10-20';
 
 const SHEET_USERS = 'Users';

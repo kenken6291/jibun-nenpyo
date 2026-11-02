@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Newspaper } from 'lucide-react'
 import VideoEmbed from './VideoEmbed.jsx'
 import EntryAttachments from './EntryAttachments.jsx'
+import { ZoomablePhoto } from './MediaViewer.jsx'
 
 function calcAge(year, profile) {
   if (!profile.birthYear || !year) return null
@@ -113,7 +114,7 @@ function TimelineEntry({ entry, isLeft, categories, profile, historicalEvents, i
               )}
               {entry.videoUrl && (
                 <div className="mt-2">
-                  <VideoEmbed videoUrl={entry.videoUrl} compact />
+                  <VideoEmbed videoUrl={entry.videoUrl} title={entry.title} compact />
                 </div>
               )}
               <EntryAttachments entry={entry} />
@@ -273,17 +274,16 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                 )}
                                 {entry.photoUrl && (
                                   <div className="mt-2">
-                                    <img
+                                    <ZoomablePhoto
                                       src={entry.photoUrl}
                                       alt={entry.title}
                                       className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
-                                      loading="lazy"
                                     />
                                   </div>
                                 )}
                                 {entry.videoUrl && (
                                   <div className="mt-2">
-                                    <VideoEmbed videoUrl={entry.videoUrl} compact />
+                                    <VideoEmbed videoUrl={entry.videoUrl} title={entry.title} compact />
                                   </div>
                                 )}
                                 <EntryAttachments entry={entry} />
@@ -322,17 +322,16 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                 )}
                                 {entry.photoUrl && (
                                   <div className="mt-2">
-                                    <img
+                                    <ZoomablePhoto
                                       src={entry.photoUrl}
                                       alt={entry.title}
                                       className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
-                                      loading="lazy"
                                     />
                                   </div>
                                 )}
                                 {entry.videoUrl && (
                                   <div className="mt-2">
-                                    <VideoEmbed videoUrl={entry.videoUrl} compact />
+                                    <VideoEmbed videoUrl={entry.videoUrl} title={entry.title} compact />
                                   </div>
                                 )}
                                 <EntryAttachments entry={entry} />

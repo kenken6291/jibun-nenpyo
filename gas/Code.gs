@@ -18,6 +18,8 @@
  *       lastViewedAt（最終閲覧日時）を Shares シート8〜10列目に保存（列見出しは自動追加）。
  *       非公開にした閲覧者には年表が一覧にも表示されず、閲覧もできない（設定は残る）。
  *       setShareEnabled で1人／グループ／全員の公開状態を即時に切り替えられる。
+ * v4.5: 新しく追加した閲覧者はデフォルト「非公開」（v4.3以前の既存行は公開扱いのまま）。
+ *       getShareSettings が shareLinkId を返し、LINE等で送る閲覧用リンク（?view=ID）を作れる。
  *
  * ■ 初回セットアップ手順
  * 1. 新しいGoogleスプレッドシートを作成する
@@ -47,8 +49,8 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.4.0';
-const APP_UPDATED = '2026-11-03';
+const APP_VERSION = '4.5.0';
+const APP_UPDATED = '2026-11-04';
 
 const SHEET_USERS = 'Users';
 const SHEET_SESSIONS = 'Sessions';
@@ -757,7 +759,7 @@ function handleGetShareSettings(body) {
 
   const shares = readShareRows().filter(function (r) { return r.ownerEmail === session.email; })
     .map(toShareSettingResponse);
-  return { success: true, shares: shares };
+  return { success: true, shares: shares, shareLinkId: shareOwnerId(session.email) };
 }
 
 function toShareSettingResponse(r) {
@@ -810,7 +812,7 @@ function handleSaveShareSettings(body) {
     if (categories.length === 0) return { success: false, error: viewerEmail + ' に見せるカテゴリーを1つ以上選んでください' };
 
     const group = SHARE_GROUP_KEYS.indexOf(s.group) !== -1 ? s.group : 'other';
-    const enabled = s.enabled === undefined ? true : !!s.enabled;
+    const enabled = s.enabled === true; // 指定が無ければ非公開（デフォルト非公開）
 
     list.push({
       viewerEmail: viewerEmail,
@@ -924,7 +926,7 @@ function handleGetSharedTimeline(body) {
   const share = readShareRows().filter(function (r) {
     return r.viewerEmail === session.email && r.enabled && shareOwnerId(r.ownerEmail) === ownerId;
   })[0];
-  if (!share) return { success: false, error: 'この年表の閲覧権限がありません（共有が解除された可能性があります）' };
+  if (!share) return { success: false, error: 'この年表は現在見られません（非公開になっているか、共有が解除された可能性があります）' };
 
   recordShareView(share);
 

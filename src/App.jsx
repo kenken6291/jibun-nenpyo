@@ -8,6 +8,8 @@ import SharedListModal from './components/share/SharedListModal.jsx'
 import { ArrowLeft, Eye, Loader2 } from 'lucide-react'
 import { dataApi, shareApi } from './utils/api.js'
 
+const PENDING_VIEW_KEY = 'jibun-nenpyo-pending-view' // main.jsx と同じキー
+
 const defaultProfile = {
   name: '',
   birthYear: '',
@@ -77,6 +79,18 @@ export default function App({ session, onLogout, onNicknameChanged }) {
       setViewingLoading(false)
     }
   }, [session.sessionToken])
+
+  // LINE等で届いた閲覧用リンク（?view=ID）から来た場合は、ログイン後にその年表を開く
+  useEffect(() => {
+    let viewId = ''
+    try {
+      viewId = localStorage.getItem(PENDING_VIEW_KEY) || ''
+      localStorage.removeItem(PENDING_VIEW_KEY)
+    } catch {
+      viewId = ''
+    }
+    if (viewId) openSharedTimeline({ ownerId: viewId, ownerNickname: '' })
+  }, [openSharedTimeline])
 
   // 初回ロード: サーバー（スプレッドシート）から年表データを取得
   const loadData = useCallback(() => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { X, Plus, Trash2, Lock, Loader2, Check, ChevronDown, Eye, EyeOff } from 'lucide-react'
+import { X, Plus, Trash2, Lock, Loader2, Check, ChevronDown, Eye, EyeOff, Send, Copy, Mail, Share2 } from 'lucide-react'
 import { shareApi } from '../../utils/api.js'
 
 // 閲覧者に見せる項目の定義
@@ -38,7 +38,8 @@ function newShare(categoryKeys, group) {
     viewerEmail: '',
     label: '',
     group: group && group !== 'all' ? group : 'family',
-    enabled: true,
+    enabled: false, // デフォルトは非公開
+
     lastViewedAt: '',
     fields: { ...DEFAULT_FIELDS },
     categories: [...categoryKeys],
@@ -81,6 +82,97 @@ function formatViewed(iso) {
     ? { month: 'numeric', day: 'numeric' }
     : { year: 'numeric', month: 'numeric', day: 'numeric' }
   return `${d.toLocaleDateString('ja-JP', opts)} に閲覧`
+}
+
+// 閲覧用リンク（相手がログインすると、その年表が直接開く）
+function buildViewUrl(linkId) {
+  const base = `${window.location.origin}${import.meta.env.BASE_URL || '/'}`
+  return `${base}?view=${linkId}`
+}
+
+function buildMessage(s, nickname, url) {
+  const to = s.label ? `${s.label}さんへ\n` : ''
+  return `${to}「人生の棚卸し年表」で、${nickname || '私'}の年表をあなたに公開しました。\n`
+    + `下のリンクを開いてログインすると見られます。\n${url}\n\n`
+    + `※ログインには、このメールアドレスでの会員登録が必要です：${s.viewerEmail}`
+}
+
+// LINE・メール等で送るパネル
+function SendPanel({ s, linkId, nickname, busy, onPublish, onClose }) {
+  const [copied, setCopied] = useState(false)
+  const url = buildViewUrl(linkId)
+  const text = buildMessage(s, nickname, url)
+  const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(text)}`
+  const mailUrl = `mailto:${encodeURIComponent(s.viewerEmail)}?subject=${encodeURIComponent('人生の棚卸し年表を公開しました')}&body=${encodeURIComponent(text)}`
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const shareOther = async () => {
+    try {
+      await navigator.share({ title: '人生の棚卸し年表', text })
+    } catch {
+      // キャンセル時は何もしない
+    }
+  }
+
+  const btn = 'flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors'
+
+  return (
+    <div className="px-3 pb-3 pt-2 space-y-2 border-t border-ink-100 dark:border-ink-700">
+      {!s.enabled && (
+        <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950 text-[11px] text-amber-700 dark:text-amber-300">
+          <EyeOff size={13} className="flex-shrink-0" />
+          <span className="flex-1">いまは非公開です。このまま送っても相手は見られません。</span>
+          <button
+            onClick={onPublish}
+            disabled={busy}
+            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />}
+            公開にする
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <a href={lineUrl} target="_blank" rel="noopener noreferrer" className={`${btn} bg-[#06C755] hover:bg-[#05b14c] text-white`}>
+          <span className="font-bold">LINE</span>で送る
+        </a>
+        <a href={mailUrl} className={`${btn} border border-ink-200 dark:border-ink-600 text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:hover:bg-ink-700`}>
+          <Mail size={13} /> メールで送る
+        </a>
+        {canShare && (
+          <button onClick={shareOther} className={`${btn} border border-ink-200 dark:border-ink-600 text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:hover:bg-ink-700`}>
+            <Share2 size={13} /> 他のアプリで送る
+          </button>
+        )}
+        <button onClick={copy} className={`${btn} border border-ink-200 dark:border-ink-600 text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:hover:bg-ink-700 ${canShare ? '' : 'col-span-2'}`}>
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? 'コピーしました' : '文面とリンクをコピー'}
+        </button>
+      </div>
+
+      <details className="text-[10px] text-ink-400 dark:text-ink-500">
+        <summary className="cursor-pointer select-none">送る文面を確認</summary>
+        <p className="mt-1 p-2 rounded bg-ink-50 dark:bg-ink-900 whitespace-pre-wrap break-all text-ink-600 dark:text-ink-300">{text}</p>
+      </details>
+      <button onClick={onClose} className="w-full text-[11px] text-ink-400 hover:text-ink-600 dark:hover:text-ink-300">閉じる</button>
+    </div>
+  )
 }
 
 function Toggle({ checked, onChange, children }) {
@@ -132,6 +224,8 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
   const [bulkBusy, setBulkBusy] = useState(false)
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
+  const [sendOpen, setSendOpen] = useState(null)
+  const [linkId, setLinkId] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
@@ -149,6 +243,7 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
           return
         }
         const list = (res.shares || []).map(s => fromServer(s, categoryKeys))
+        setLinkId(res.shareLinkId || '')
         setShares(list)
         rebuildSaved(list)
       })
@@ -202,6 +297,23 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
     const s = newShare(categoryKeys, filter)
     setShares(prev => [...prev, s])
     setExpanded(s.uid)
+  }
+
+  // ---- LINE等で送る ----
+  const openSend = (s) => {
+    setError('')
+    setMessage('')
+    if (!s.persisted) {
+      setExpanded(s.uid)
+      setError('新しく追加した閲覧者は、先に「保存する」を押してから送ってください')
+      return
+    }
+    if (!linkId) {
+      setError('リンクを作成できませんでした。画面を開き直してください（GASの再デプロイが必要な場合があります）')
+      return
+    }
+    setExpanded(null)
+    setSendOpen(sendOpen === s.uid ? null : s.uid)
   }
 
   // ---- 公開／非公開の即時切り替え ----
@@ -359,7 +471,8 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
         <div className="px-4 pt-3 pb-2 space-y-2 border-b border-ink-100 dark:border-ink-700">
           <p className="text-[11px] leading-relaxed text-ink-500 dark:text-ink-400">
             指定した<strong>登録会員</strong>（家族・友人など）だけが、ログイン後にあなたの年表を閲覧できます。
-            スイッチで<strong>公開／非公開</strong>をすぐに切り替えられます（非公開にしても設定は残ります）。
+            スイッチで<strong>公開／非公開</strong>をすぐに切り替えられます（追加した直後は非公開・非公開にしても設定は残ります）。
+            「送る」からLINEやメールで閲覧用リンクを知らせられます。
           </p>
 
           {!loading && (
@@ -457,7 +570,7 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
                         onChange={v => toggleEnabled(s, v)}
                       />
                       <button
-                        onClick={() => setExpanded(open ? null : s.uid)}
+                        onClick={() => { setSendOpen(null); setExpanded(open ? null : s.uid) }}
                         className="flex-1 min-w-0 flex items-center gap-2 text-left"
                       >
                         <span className="text-base leading-none" title={g.label}>{g.icon}</span>
@@ -479,7 +592,29 @@ export default function ShareSettingsModal({ session, categories, onClose, onSav
                         )}
                         <ChevronDown size={14} className={`flex-shrink-0 text-ink-400 transition-transform ${open ? 'rotate-180' : ''}`} />
                       </button>
+                      <button
+                        onClick={() => openSend(s)}
+                        title="LINE・メールなどでお知らせを送る"
+                        className={`flex-shrink-0 flex flex-col items-center gap-0.5 px-1.5 py-1 rounded-lg text-[9px] transition-colors
+                          ${sendOpen === s.uid
+                            ? 'bg-indigo-700 text-white'
+                            : 'text-indigo-700 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950'}`}
+                      >
+                        <Send size={14} />
+                        送る
+                      </button>
                     </div>
+
+                    {sendOpen === s.uid && !open && (
+                      <SendPanel
+                        s={s}
+                        linkId={linkId}
+                        nickname={session.nickname}
+                        busy={busyUids.includes(s.uid)}
+                        onPublish={() => toggleEnabled(s, true)}
+                        onClose={() => setSendOpen(null)}
+                      />
+                    )}
 
                     {/* 詳細設定 */}
                     {open && (

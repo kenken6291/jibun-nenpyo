@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Newspaper } from 'lucide-react'
 import VideoEmbed from './VideoEmbed.jsx'
 import EntryAttachments from './EntryAttachments.jsx'
-import { ZoomablePhoto } from './MediaViewer.jsx'
+import { EntryPhotos } from './MediaViewer.jsx'
 
 function calcAge(year, profile) {
   if (!profile.birthYear || !year) return null
@@ -272,15 +272,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     {entry.memo}
                                   </p>
                                 )}
-                                {entry.photoUrl && (
-                                  <div className="mt-2">
-                                    <ZoomablePhoto
-                                      src={entry.photoUrl}
-                                      alt={entry.title}
-                                      className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
-                                    />
-                                  </div>
-                                )}
+                                <EntryPhotos entry={entry} />
                                 {entry.videoUrl && (
                                   <div className="mt-2">
                                     <VideoEmbed videoUrl={entry.videoUrl} title={entry.title} compact />
@@ -320,15 +312,7 @@ export default function Timeline({ profile, entries, categories, historicalEvent
                                     {entry.memo}
                                   </p>
                                 )}
-                                {entry.photoUrl && (
-                                  <div className="mt-2">
-                                    <ZoomablePhoto
-                                      src={entry.photoUrl}
-                                      alt={entry.title}
-                                      className="w-full max-h-48 object-cover rounded-lg border border-ink-200 dark:border-ink-600"
-                                    />
-                                  </div>
-                                )}
+                                <EntryPhotos entry={entry} />
                                 {entry.videoUrl && (
                                   <div className="mt-2">
                                     <VideoEmbed videoUrl={entry.videoUrl} title={entry.title} compact />

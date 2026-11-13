@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User, Calendar, Video, Image as ImageIcon, X, Loader2, Globe, FileText } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, Calendar, Video, Image as ImageIcon, X, Loader2, Globe, FileText } from 'lucide-react'
 import { parseVideoUrl } from '../utils/video.js'
 import VideoEmbed from './VideoEmbed.jsx'
 import { resizeImageFile, formatFileSize } from '../utils/imageResize.js'
 import { dataApi } from '../utils/api.js'
 import { linkHost, formatBytes } from './EntryAttachments.jsx'
+import { getEntryPhotos, thumbImageUrl } from './MediaViewer.jsx'
 
 const MAX_LINKS = 5
 const MAX_FILES = 5
+const MAX_PHOTOS = 20 // 1つの出来事に登録できる写真の枚数（GAS側と揃える）
 const MAX_PDF_BYTES = 10 * 1024 * 1024 // 10MB
 
 function readFileAsBase64(file) {
@@ -30,7 +32,7 @@ const emptyForm = {
   category: 'general',
   memo: '',
   videoUrl: '',
-  photoUrl: '',
+  photos: [], // [{ fileId, url }] 先頭が表紙
   links: [],
   files: [],
 }
@@ -40,6 +42,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
   const [profileOpen, setProfileOpen] = useState(!profile.birthYear)
   const [errors, setErrors] = useState({})
   const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoProgress, setPhotoProgress] = useState({ done: 0, total: 0 })
   const [photoError, setPhotoError] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
@@ -56,7 +59,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
         category: editingEntry.category,
         memo: editingEntry.memo || '',
         videoUrl: editingEntry.videoUrl || '',
-        photoUrl: editingEntry.photoUrl || '',
+        photos: getEntryPhotos(editingEntry),
         links: Array.isArray(editingEntry.links) ? editingEntry.links : [],
         files: Array.isArray(editingEntry.files) ? editingEntry.files : [],
       })
@@ -94,6 +97,7 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
       }
     }
     if (fileUploading) e.files = 'PDFのアップロード完了をお待ちください'
+    if (photoUploading) e.photos = '写真のアップロード完了をお待ちください'
     setErrors(e)
     if (Object.keys(e).length > 0) return
 
@@ -104,7 +108,8 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
       category: form.category,
       memo: form.memo.trim(),
       videoUrl: form.videoUrl.trim(),
-      photoUrl: form.photoUrl,
+      photos: form.photos,
+      photoUrl: form.photos[0]?.url || '',
       links,
       files: form.files,
     }
@@ -194,35 +199,64 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
     setForm(f => ({ ...f, files: f.files.filter((_, i) => i !== idx) }))
   }
 
+  // 写真の追加（複数枚まとめて選択可。1枚ずつ縮小してGoogleドライブへ保存）
   const handlePhotoSelect = async (e) => {
-    const file = e.target.files[0]
+    const selected = Array.from(e.target.files || [])
     e.target.value = ''
-    if (!file) return
+    if (selected.length === 0) return
 
     setPhotoError('')
-    setPhotoUploading(true)
-    try {
-      const resized = await resizeImageFile(file)
-      const res = await dataApi.uploadPhoto(
-        session.sessionToken,
-        file.name.replace(/\.[^.]+$/, '') + '.jpg',
-        resized.mimeType,
-        resized.base64Data
-      )
-      if (!res.success) {
-        setPhotoError(res.error || 'アップロードに失敗しました')
-        return
-      }
-      setForm(f => ({ ...f, photoUrl: res.photoUrl }))
-    } catch (err) {
-      setPhotoError(err.message || '画像の処理に失敗しました')
-    } finally {
-      setPhotoUploading(false)
+    const room = MAX_PHOTOS - form.photos.length
+    if (room <= 0) {
+      setPhotoError(`写真は${MAX_PHOTOS}枚までです`)
+      return
     }
+    const targets = selected.slice(0, room)
+    const errorsList = []
+    if (selected.length > room) {
+      errorsList.push(`写真は${MAX_PHOTOS}枚までのため、${selected.length - room}枚は追加しませんでした`)
+    }
+
+    setPhotoUploading(true)
+    setPhotoProgress({ done: 0, total: targets.length })
+    for (let i = 0; i < targets.length; i++) {
+      const file = targets[i]
+      try {
+        const resized = await resizeImageFile(file)
+        const res = await dataApi.uploadPhoto(
+          session.sessionToken,
+          file.name.replace(/\.[^.]+$/, '') + '.jpg',
+          resized.mimeType,
+          resized.base64Data
+        )
+        if (res.success) {
+          // 1枚アップロードできるたびに一覧へ追加（途中で失敗しても成功分は残る）
+          setForm(f => ({ ...f, photos: [...f.photos, { fileId: res.fileId || '', url: res.photoUrl }] }))
+        } else {
+          errorsList.push(`${file.name}：${res.error || 'アップロードに失敗しました'}`)
+        }
+      } catch (err) {
+        errorsList.push(`${file.name}：${err.message || '画像の処理に失敗しました'}`)
+      }
+      setPhotoProgress({ done: i + 1, total: targets.length })
+    }
+    setPhotoUploading(false)
+    if (errorsList.length > 0) setPhotoError(errorsList.join('\n'))
   }
 
-  const handleRemovePhoto = () => {
-    setForm(f => ({ ...f, photoUrl: '' }))
+  const handleRemovePhoto = (idx) => {
+    setForm(f => ({ ...f, photos: f.photos.filter((_, i) => i !== idx) }))
+  }
+
+  // 写真の並べ替え（先頭＝表紙）
+  const handleMovePhoto = (idx, delta) => {
+    setForm(f => {
+      const to = idx + delta
+      if (to < 0 || to >= f.photos.length) return f
+      const photos = [...f.photos]
+      ;[photos[idx], photos[to]] = [photos[to], photos[idx]]
+      return { ...f, photos }
+    })
   }
 
   const calcAge = (year) => {
@@ -413,50 +447,87 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
               <ImageIcon size={12} className="inline mr-1" />写真（任意）
             </label>
 
-            {form.photoUrl ? (
-              <div className="relative inline-block">
-                <img
-                  src={form.photoUrl}
-                  alt="アップロードした写真"
-                  className="max-w-[220px] max-h-[160px] rounded-lg border border-ink-200 dark:border-ink-600 object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={handleRemovePhoto}
-                  title="写真を削除"
-                  className="absolute -top-2 -right-2 w-6 h-6 flex items-center justify-center rounded-full
-                    bg-ink-800 text-white shadow hover:bg-red-600 transition-colors"
-                >
-                  <X size={13} />
-                </button>
+            {form.photos.length > 0 && (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
+                {form.photos.map((p, i) => (
+                  <div key={`${i}-${p.url}`} className="relative group">
+                    <img
+                      src={thumbImageUrl(p.url, 300)}
+                      alt={`写真${i + 1}`}
+                      className={`w-full aspect-square object-cover rounded-lg border-2 ${
+                        i === 0 ? 'border-indigo-500' : 'border-ink-200 dark:border-ink-600'
+                      }`}
+                    />
+                    {i === 0 && (
+                      <span className="absolute top-1 left-1 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-indigo-600 text-white">
+                        表紙
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePhoto(i)}
+                      title="この写真を外す"
+                      className="absolute -top-1.5 -right-1.5 w-6 h-6 flex items-center justify-center rounded-full
+                        bg-ink-800 text-white shadow hover:bg-red-600 transition-colors"
+                    >
+                      <X size={13} />
+                    </button>
+                    {form.photos.length > 1 && (
+                      <div className="absolute bottom-1 inset-x-1 flex justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handleMovePhoto(i, -1)}
+                          disabled={i === 0}
+                          title="前へ移動"
+                          className="w-6 h-6 flex items-center justify-center rounded-full bg-black/55 text-white disabled:opacity-0 hover:bg-black/75"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMovePhoto(i, 1)}
+                          disabled={i === form.photos.length - 1}
+                          title="後ろへ移動"
+                          className="w-6 h-6 flex items-center justify-center rounded-full bg-black/55 text-white disabled:opacity-0 hover:bg-black/75"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            ) : (
-              <label className="flex items-center justify-center gap-2 w-full px-3 py-3 text-sm rounded-lg border border-dashed
-                border-ink-300 dark:border-ink-600 text-ink-400 dark:text-ink-500
-                hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors cursor-pointer">
+            )}
+
+            {form.photos.length < MAX_PHOTOS && (
+              <label className={`flex items-center justify-center gap-2 w-full px-3 py-3 text-sm rounded-lg border border-dashed
+                border-ink-300 dark:border-ink-600 text-ink-400 dark:text-ink-500 transition-colors
+                ${photoUploading ? 'cursor-wait' : 'hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'}`}>
                 {photoUploading ? (
                   <>
                     <Loader2 size={14} className="animate-spin" />
-                    アップロード中…
+                    アップロード中…（{photoProgress.done} / {photoProgress.total}枚）
                   </>
                 ) : (
                   <>
                     <ImageIcon size={14} />
-                    写真を選択（自動で縮小してアップロードされます）
+                    {form.photos.length === 0 ? '写真を選択（複数枚まとめて選べます）' : `写真を追加（あと${MAX_PHOTOS - form.photos.length}枚）`}
                   </>
                 )}
                 <input
                   type="file"
                   accept="image/*"
+                  multiple
                   className="hidden"
                   disabled={photoUploading}
                   onChange={handlePhotoSelect}
                 />
               </label>
             )}
-            {photoError && <p className="text-xs text-red-500 mt-1">{photoError}</p>}
+            {photoError && <p className="text-xs text-red-500 mt-1 whitespace-pre-line">{photoError}</p>}
+            {errors.photos && <p className="text-xs text-red-500 mt-1">{errors.photos}</p>}
             <p className="text-[11px] text-ink-400 dark:text-ink-500 mt-1 leading-relaxed">
-              大きい写真も自動で縮小してからGoogleドライブに保存されます
+              最大{MAX_PHOTOS}枚。自動で縮小してGoogleドライブに保存されます。1枚目が年表の表紙になり、クリックするとスライドショーで見られます
             </p>
           </div>
 
@@ -670,9 +741,9 @@ export default function Editor({ profile, entries, editingEntry, onProfileChange
                           <Video size={9} /> 動画
                         </span>
                       )}
-                      {entry.photoUrl && (
+                      {getEntryPhotos(entry).length > 0 && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-ink-100 dark:bg-ink-700 text-ink-500 dark:text-ink-300 flex items-center gap-0.5">
-                          <ImageIcon size={9} /> 写真
+                          <ImageIcon size={9} /> 写真{getEntryPhotos(entry).length > 1 ? `×${getEntryPhotos(entry).length}` : ''}
                         </span>
                       )}
                       {entry.links?.length > 0 && (

@@ -20,6 +20,10 @@
  *       setShareEnabled で1人／グループ／全員の公開状態を即時に切り替えられる。
  * v4.5: 新しく追加した閲覧者はデフォルト「非公開」（v4.3以前の既存行は公開扱いのまま）。
  *       getShareSettings が shareLinkId を返し、LINE等で送る閲覧用リンク（?view=ID）を作れる。
+ * v4.6: 1つの出来事に写真を複数枚（最大20枚）登録可能に。写真はGoogleドライブに保存し、
+ *       一覧は attachmentsJson の photos 配列に保存（列の追加は不要）。
+ *       photoUrl 列には1枚目（表紙）のURLを入れるので、旧バージョンの画面とも互換。
+ *       写真が1枚だけの旧データは、読み込み時に photos=[photoUrl] として返す。
  *
  * ■ 初回セットアップ手順
  * 1. 新しいGoogleスプレッドシートを作成する
@@ -49,8 +53,8 @@
 // ==========================================================
 // サーバー（GAS）のバージョン。フロント側 src/config.js の APP_VERSION と揃える。
 // 画面のバージョン情報で両者が違うと「再デプロイ忘れ」の警告が出ます。
-const APP_VERSION = '4.5.0';
-const APP_UPDATED = '2026-11-04';
+const APP_VERSION = '4.6.0';
+const APP_UPDATED = '2026-11-13';
 
 const SHEET_USERS = 'Users';
 const SHEET_SESSIONS = 'Sessions';
@@ -120,6 +124,7 @@ const MAX_PDF_BYTES = 10 * 1024 * 1024;  // PDFは1件10MBまで
 const MAX_FILE_BASE64_CHARS = 14000000; // 10MBをBase64化すると約13.4M文字になるため少し余裕を持たせる
 const MAX_LINKS_PER_ENTRY = 5;
 const MAX_FILES_PER_ENTRY = 5;
+const MAX_PHOTOS_PER_ENTRY = 20; // v4.6: 1つの出来事に登録できる写真の枚数
 
 // ==========================================================
 // エントリーポイント
@@ -459,7 +464,7 @@ function handleAddEntry(body) {
     now,
     now,
     validation.value.photoUrl,
-    JSON.stringify({ links: validation.value.links, files: validation.value.files }),
+    JSON.stringify({ links: validation.value.links, files: validation.value.files, photos: validation.value.photos }),
   ]);
   ensureEntriesAttachmentsHeader(sheet);
 
@@ -474,6 +479,7 @@ function handleAddEntry(body) {
       memo: validation.value.memo,
       videoUrl: validation.value.videoUrl,
       photoUrl: validation.value.photoUrl,
+      photos: validation.value.photos,
       links: validation.value.links,
       files: validation.value.files,
     },
@@ -509,7 +515,7 @@ function handleUpdateEntry(body) {
   sheet.getRange(rowIdx, ENTRIES_COL.videoUrl).setValue(validation.value.videoUrl);
   sheet.getRange(rowIdx, ENTRIES_COL.photoUrl).setValue(validation.value.photoUrl);
   sheet.getRange(rowIdx, ENTRIES_COL.attachmentsJson)
-    .setValue(JSON.stringify({ links: validation.value.links, files: validation.value.files }));
+    .setValue(JSON.stringify({ links: validation.value.links, files: validation.value.files, photos: validation.value.photos }));
   ensureEntriesAttachmentsHeader(sheet);
   sheet.getRange(rowIdx, ENTRIES_COL.updatedAt).setValue(new Date());
 
@@ -524,6 +530,7 @@ function handleUpdateEntry(body) {
       memo: validation.value.memo,
       videoUrl: validation.value.videoUrl,
       photoUrl: validation.value.photoUrl,
+      photos: validation.value.photos,
       links: validation.value.links,
       files: validation.value.files,
     },
@@ -581,7 +588,7 @@ function handleUploadPhoto(body) {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     const fileId = file.getId();
-    const url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
+    const url = drivePhotoUrl(fileId);
 
     return { success: true, photoUrl: url, fileId: fileId };
   } catch (err) {
@@ -655,6 +662,9 @@ function listEntriesForEmail(email) {
     const row = data[i];
     if (normalizeEmail(row[ENTRIES_COL.email - 1]) !== email) continue;
     const att = parseAttachments(row[ENTRIES_COL.attachmentsJson - 1]);
+    const photoUrl = row[ENTRIES_COL.photoUrl - 1] || '';
+    // 旧データ（写真1枚・photoUrl列のみ）は photos に1枚として入れて返す
+    const photos = att.photos.length > 0 ? att.photos : (photoUrl ? [{ fileId: extractDriveFileId(photoUrl), url: photoUrl }] : []);
     result.push({
       id: row[ENTRIES_COL.id - 1],
       year: row[ENTRIES_COL.year - 1],
@@ -663,7 +673,8 @@ function listEntriesForEmail(email) {
       category: row[ENTRIES_COL.category - 1],
       memo: row[ENTRIES_COL.memo - 1] || '',
       videoUrl: row[ENTRIES_COL.videoUrl - 1] || '',
-      photoUrl: row[ENTRIES_COL.photoUrl - 1] || '',
+      photoUrl: photos.length > 0 ? photos[0].url : '',
+      photos: photos,
       links: att.links,
       files: att.files,
     });
@@ -698,7 +709,30 @@ function validateEntryInput(input) {
   const category = validCategories.indexOf(input.category) !== -1 ? input.category : 'general';
   const memo = String(input.memo || '').slice(0, 1000);
   const videoUrl = String(input.videoUrl || '').slice(0, 500);
-  const photoUrl = String(input.photoUrl || '').slice(0, 500);
+
+  // 写真（v4.6: 複数枚。uploadPhotoで保存済みのDriveファイルのみ受け付ける。1枚目が表紙）
+  let rawPhotos = Array.isArray(input.photos) ? input.photos : [];
+  if (rawPhotos.length === 0 && input.photoUrl) rawPhotos = [{ url: input.photoUrl }]; // 旧画面からの送信
+  if (rawPhotos.length > MAX_PHOTOS_PER_ENTRY) return { error: '写真は' + MAX_PHOTOS_PER_ENTRY + '枚までです' };
+  const photos = [];
+  const seenPhoto = {};
+  for (let i = 0; i < rawPhotos.length; i++) {
+    const p = rawPhotos[i] || {};
+    const fileId = String(p.fileId || extractDriveFileId(p.url) || '');
+    if (/^[A-Za-z0-9_-]{10,100}$/.test(fileId)) {
+      if (seenPhoto[fileId]) continue;
+      seenPhoto[fileId] = true;
+      photos.push({ fileId: fileId, url: drivePhotoUrl(fileId) });
+    } else {
+      // Drive以外のURLで登録された古い写真はそのまま残す
+      const url = String(p.url || '').trim();
+      if (/^https:\/\/[^\s]+$/i.test(url) && url.length <= 500 && !seenPhoto[url]) {
+        seenPhoto[url] = true;
+        photos.push({ fileId: '', url: url });
+      }
+    }
+  }
+  const photoUrl = photos.length > 0 ? photos[0].url : '';
 
   // ホームページURL
   const rawLinks = Array.isArray(input.links) ? input.links : [];
@@ -729,7 +763,7 @@ function validateEntryInput(input) {
     });
   }
 
-  return { value: { year: year, month: month, title: title, category: category, memo: memo, videoUrl: videoUrl, photoUrl: photoUrl, links: links, files: files } };
+  return { value: { year: year, month: month, title: title, category: category, memo: memo, videoUrl: videoUrl, photoUrl: photoUrl, photos: photos, links: links, files: files } };
 }
 
 function parseAttachments(raw) {
@@ -738,7 +772,22 @@ function parseAttachments(raw) {
   return {
     links: Array.isArray(obj.links) ? obj.links : [],
     files: Array.isArray(obj.files) ? obj.files : [],
+    photos: Array.isArray(obj.photos) ? obj.photos : [],
   };
+}
+
+// DriveのURL（thumbnail?id=… / file/d/…/）からファイルIDを取り出す
+function extractDriveFileId(url) {
+  const u = String(url || '');
+  let m = u.match(/[?&]id=([A-Za-z0-9_-]{10,100})/);
+  if (m) return m[1];
+  m = u.match(/\/file\/d\/([A-Za-z0-9_-]{10,100})/);
+  return m ? m[1] : '';
+}
+
+// 写真の表示用URL（Driveのサムネイル。拡大時は画面側で高解像度版に差し替える）
+function drivePhotoUrl(fileId) {
+  return 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
 }
 
 // 既存のEntriesシートに attachmentsJson 列の見出しが無ければ追加（setupSheetsの再実行不要）
@@ -956,6 +1005,7 @@ function handleGetSharedTimeline(body) {
         month: f.month ? (e.month || null) : null,
         memo: f.memo ? e.memo : '',
         photoUrl: f.photo ? e.photoUrl : '',
+        photos: f.photo ? e.photos : [],
         videoUrl: f.video ? e.videoUrl : '',
         links: f.link ? e.links : [],
         files: f.pdf ? e.files : [],
